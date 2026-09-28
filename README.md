@@ -7,7 +7,7 @@ An interactive deployment and management script for a Linux VPS running
 
 ## Scope
 
-This script installs `v2.1.1` by default and supports current releases from
+This script installs `v2.1.2` by default and supports current releases from
 `v2.0.0` onward. Release selection excludes V1 automatically. It generates
 `nowhere://` links for Anywhere plus `vector://` URLs for the native Vector client.
 
@@ -26,6 +26,8 @@ This script installs `v2.1.1` by default and supports current releases from
   available carrier.
 - Terminal UI, logs, service lifecycle commands, and TLS certificate SHA-256
   fingerprint output.
+- Read-only instance telemetry and one-shot TCP Flow connectivity probes
+  (Nowhere `v2.1.2` and later).
 
 ## Quick Start
 
@@ -56,14 +58,16 @@ group.
 7) Start service
 8) Stop service
 9) Restart service
-10) Show status
-11) Open Terminal UI
-12) Follow logs
-13) Print client links / QR code
-14) Show certificate SHA-256
-15) Uninstall
-16) Switch language
-17) Update deployment script
+10) Show Nowhere instance status (v2.1.2+)
+11) Probe TCP connectivity (v2.1.2+)
+12) Show systemd service status
+13) Open Terminal UI
+14) Follow logs
+15) Print client links / QR code
+16) Show certificate SHA-256
+17) Uninstall
+18) Switch language
+19) Update deployment script
 ```
 
 For non-interactive defaults:
@@ -174,6 +178,8 @@ sudo bash nowhere-vps.sh start
 sudo bash nowhere-vps.sh stop
 sudo bash nowhere-vps.sh restart
 sudo bash nowhere-vps.sh status
+sudo bash nowhere-vps.sh telemetry
+sudo bash nowhere-vps.sh probe example.com:443
 sudo bash nowhere-vps.sh tui
 sudo bash nowhere-vps.sh logs
 sudo bash nowhere-vps.sh link
@@ -182,6 +188,12 @@ sudo bash nowhere-vps.sh uninstall
 ```
 
 Run `bash nowhere-vps.sh --help` for the complete option list.
+
+`status` reports the systemd service state; `telemetry` runs Nowhere's local
+read-only instance snapshot. `probe` builds a temporary Vector URL from the
+saved server settings and tests one TCP Flow to the requested target without
+printing the shared key or sending application payload. These two commands
+require an installed Nowhere binary `v2.1.2` or later.
 
 ## Files
 

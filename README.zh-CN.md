@@ -7,7 +7,7 @@
 
 ## 支持范围
 
-脚本默认安装 `v2.1.1`，支持 `v2.0.0` 及之后的当前 Release；指定版本列表会自动
+脚本默认安装 `v2.1.2`，支持 `v2.0.0` 及之后的当前 Release；指定版本列表会自动
 排除 V1。脚本输出 Anywhere 的 `nowhere://` 链接和 Native Vector 的 `vector://` URL。
 
 ## 功能
@@ -22,6 +22,7 @@
   SOCKS5 监听。
 - 输出 Anywhere 的 TCP、UDP 导入链接，并为优先可用链路生成终端二维码。
 - 提供 Terminal UI、日志、服务启停与 TLS 证书 SHA-256 查询。
+- 提供只读实例状态和 TCP Flow 连通性探测（Nowhere `v2.1.2` 及之后版本）。
 
 ## 快速开始
 
@@ -49,14 +50,16 @@ sudo bash nowhere-vps.sh
 7) 启动服务
 8) 停止服务
 9) 重启服务
-10) 查看状态
-11) 打开 Terminal UI
-12) 查看日志
-13) 打印客户端链接 / 二维码
-14) 查看证书 SHA-256
-15) 卸载服务
-16) 切换语言
-17) 更新部署脚本
+10) 查看 Nowhere 实例状态（2.1.2+）
+11) 测试 TCP 连通性（2.1.2+）
+12) 查看 systemd 服务状态
+13) 打开 Terminal UI
+14) 查看日志
+15) 打印客户端链接 / 二维码
+16) 查看证书 SHA-256
+17) 卸载服务
+18) 切换语言
+19) 更新部署脚本
 ```
 
 非交互默认安装：
@@ -158,6 +161,8 @@ sudo bash nowhere-vps.sh start
 sudo bash nowhere-vps.sh stop
 sudo bash nowhere-vps.sh restart
 sudo bash nowhere-vps.sh status
+sudo bash nowhere-vps.sh telemetry
+sudo bash nowhere-vps.sh probe example.com:443
 sudo bash nowhere-vps.sh tui
 sudo bash nowhere-vps.sh logs
 sudo bash nowhere-vps.sh link
@@ -170,6 +175,11 @@ sudo bash nowhere-vps.sh uninstall
 ```bash
 bash nowhere-vps.sh --help
 ```
+
+`status` 查看 systemd 服务状态；`telemetry` 调用 Nowhere 的只读实例状态快照。
+`probe` 会根据已保存的服务配置临时生成 Vector URL，测试到目标地址的一次 TCP
+Flow，不会显示共享密钥，也不会发送应用数据。这两个命令要求已安装 Nowhere
+`v2.1.2` 或更新版本；较旧版本请先从菜单更新二进制。
 
 ## 文件位置
 

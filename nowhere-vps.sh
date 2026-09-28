@@ -11,7 +11,7 @@ CONFIG_DIR="/etc/nowhere"
 CONFIG_FILE="${CONFIG_DIR}/nowhere.env"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-DEFAULT_VERSION="v2.1.1"
+DEFAULT_VERSION="v2.1.2"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
 DEFAULT_UDP_CARRIER="udp"
@@ -34,6 +34,8 @@ VERSION_EXPLICIT=0
 ALLOW_MORPH_BREAKING_UPGRADE=0
 ACTION="${1:-menu}"
 [[ $# -eq 0 ]] || shift
+PROBE_TARGET=""
+if [[ "$ACTION" == probe && $# -gt 0 && "$1" != -* ]]; then PROBE_TARGET="$1"; shift; fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -77,6 +79,7 @@ while [[ $# -gt 0 ]]; do
     --transport-memory-profile) NOWHERE_TRANSPORT_MEMORY_PROFILE="${2:?missing --transport-memory-profile value}"; shift 2 ;;
     --mix-fallback-timeout) NOWHERE_MIX_FALLBACK_TIMEOUT="${2:?missing --mix-fallback-timeout value}"; shift 2 ;;
     --telemetry-interval) NOWHERE_TELEMETRY_INTERVAL="${2:?missing --telemetry-interval value}"; shift 2 ;;
+    --target) [[ "$ACTION" == probe ]] || { printf '%s\n' "--target is only valid with the probe command." >&2; exit 1; }; [[ -z "$PROBE_TARGET" ]] || { printf '%s\n' "Specify the probe target only once." >&2; exit 1; }; [[ $# -ge 2 ]] || { printf '%s\n' "Missing --target value." >&2; exit 1; }; PROBE_TARGET="$2"; shift 2 ;;
     -h|--help) ACTION="help"; shift ;;
     *) printf 'Unknown option: %s\n' "$1" >&2; exit 1 ;;
   esac
@@ -95,17 +98,18 @@ Usage:
   sudo bash nowhere-vps.sh install [--yes] [options]
   sudo bash nowhere-vps.sh install-vector [--yes] [options]
   sudo bash nowhere-vps.sh configure [options]
-  sudo bash nowhere-vps.sh update [--version v2.1.1]
+  sudo bash nowhere-vps.sh update [--version v2.1.2]
   sudo bash nowhere-vps.sh update-script
   sudo bash nowhere-vps.sh versions
-  sudo bash nowhere-vps.sh start|stop|restart|status|tui|logs|link|fingerprint|uninstall
+  sudo bash nowhere-vps.sh start|stop|restart|status|telemetry|tui|logs|link|fingerprint|uninstall
+  sudo bash nowhere-vps.sh probe [host:port]
 
 This script supports Nowhere releases v2.0.0 and later. Press Enter in the wizard to keep defaults.
 
 Options:
   --client anywhere|vector|both
   --lang zh|en                    Wizard and menu language
-  --version v2.1.1
+  --version v2.1.2
   --key secret
   --public-host host              Client-facing domain or IP
   --listen-host host              Portal bind host; empty binds wildcard addresses
@@ -129,6 +133,7 @@ Options:
   --transport-memory-profile memory|balanced|throughput
   --mix-fallback-timeout 1s
   --telemetry-interval 1s
+  --target host:port              Probe target; only valid with the probe command
 EOF
 }
 
@@ -260,6 +265,17 @@ version_at_least() {
     (( 10#$value < 10#$threshold )) && return 1
   done
   return 0
+}
+require_nowhere_version_at_least() {
+  local minimum="$1" installed
+  require_root
+  [[ -x "$BIN_PATH" ]] || die "Nowhere is not installed."
+  load_config
+  installed="${NOWHERE_VERSION_VALUE:-}"
+  [[ -n "$installed" ]] || die "No installation config found."
+  require_supported_version "$installed"
+  version_at_least "$installed" "$minimum" && return 0
+  if is_chinese; then die "此命令需要 Nowhere ${minimum} 或更高版本，请先更新 Nowhere 二进制。"; else die "This command requires Nowhere ${minimum} or later; update the Nowhere binary first."; fi
 }
 validate_log_level() {
   if version_at_least "$NOWHERE_VERSION" v2.1.1; then
@@ -400,16 +416,53 @@ build_portal_url() {
   printf 'portal://%s@%s?%s' "$key" "$endpoint" "$query"
 }
 build_vector_query() {
+  local include_socks="${1:-1}"
   local up="${NOWHERE_VECTOR_UP_VALUE:-tcp}" down="${NOWHERE_VECTOR_DOWN_VALUE:-tcp}" mux="${NOWHERE_VECTOR_MUX_VALUE:-$DEFAULT_MUX}"
   local sni="${NOWHERE_VECTOR_SNI_VALUE:-$DEFAULT_SNI}" pin="${NOWHERE_VECTOR_PIN_VALUE:-$DEFAULT_PIN}" morph="${NOWHERE_MORPH_VALUE:-$DEFAULT_MORPH}"
   local socks="${NOWHERE_VECTOR_SOCKS_VALUE:-$DEFAULT_VECTOR_SOCKS}" rate="${NOWHERE_VECTOR_RATE_VALUE:-0}" etar="${NOWHERE_VECTOR_ETAR_VALUE:-0}" log="${NOWHERE_VECTOR_LOG_VALUE:-$DEFAULT_LOG}"
   local query="up=${up}&down=${down}&mux=${mux}"
   query="${query}&sni=$(urlencode "$sni")&pin=$(urlencode "$pin")"
-  query="${query}&morph=${morph}&socks=$(urlencode "$socks")"
+  query="${query}&morph=${morph}"
+  if [[ "$include_socks" == 1 ]]; then query="${query}&socks=$(urlencode "$socks")"; fi
   [[ "$rate" == 0 ]] || query="${query}&rate=${rate}"
   [[ "$etar" == 0 ]] || query="${query}&etar=${etar}"
   [[ "$log" == "$DEFAULT_LOG" ]] || query="${query}&log=${log}"
   printf '%s' "$query"
+}
+validate_probe_target() {
+  local target="$1" host port
+  [[ -n "$target" && "$target" != *[[:space:]]* ]] || return 1
+  if [[ "$target" == \[*\]:* ]]; then
+    host="${target#\[}"; host="${host%%\]:*}"; port="${target##*\]:}"
+  else
+    [[ "$target" == *:* ]] || return 1
+    host="${target%:*}"; port="${target##*:}"
+    [[ "$host" != *:* ]] || return 1
+  fi
+  [[ -n "$host" ]] && validate_port "$port"
+}
+build_probe_vector_url() {
+  load_config
+  [[ -n "${NOWHERE_KEY_VALUE:-}" ]] || die "No configuration found."
+  local public_host="${NOWHERE_PUBLIC_HOST_VALUE:-}" host key endpoint query
+  [[ -n "$public_host" ]] || die "Public host is empty. Reconfigure the service."
+  case "$public_host" in '*'|0.0.0.0|::|'[::]') die "A concrete public host is required for the probe." ;; esac
+  [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" != none || "${NOWHERE_UDP_CARRIER_VALUE:-none}" != none ]] || die "No carrier is enabled."
+  host="$(format_host_for_url "$public_host")"
+  key="$(urlencode "$NOWHERE_KEY_VALUE")"
+  endpoint="$(build_endpoint "$host" "${NOWHERE_TCP_CARRIER_VALUE:-none}" "${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}" "${NOWHERE_UDP_CARRIER_VALUE:-none}" "${NOWHERE_UDP_PORT_VALUE:-$DEFAULT_PORT}")"
+
+  local NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER_VALUE:-none}"
+  local NOWHERE_UDP_CARRIER="${NOWHERE_UDP_CARRIER_VALUE:-none}"
+  local NOWHERE_VECTOR_UP_VALUE="${NOWHERE_VECTOR_UP_VALUE:-tcp}"
+  local NOWHERE_VECTOR_DOWN_VALUE="${NOWHERE_VECTOR_DOWN_VALUE:-tcp}"
+  if ! validate_policy_for_endpoint "$NOWHERE_VECTOR_UP_VALUE" "$NOWHERE_VECTOR_DOWN_VALUE"; then
+    if [[ "${NOWHERE_CLIENT_VALUE:-anywhere}" != anywhere ]]; then die "Saved Vector route is incompatible with the enabled carriers; reconfigure the service."; fi
+    if [[ "$NOWHERE_TCP_CARRIER" != none ]]; then NOWHERE_VECTOR_UP_VALUE=tcp; NOWHERE_VECTOR_DOWN_VALUE=tcp; else NOWHERE_VECTOR_UP_VALUE=udp; NOWHERE_VECTOR_DOWN_VALUE=udp; fi
+    if is_chinese; then warn "当前 Vector 路由与启用的载体不匹配；本次探测临时使用 ${NOWHERE_VECTOR_UP_VALUE}/${NOWHERE_VECTOR_DOWN_VALUE}。"; else warn "Saved Vector route is unavailable; this probe will use ${NOWHERE_VECTOR_UP_VALUE}/${NOWHERE_VECTOR_DOWN_VALUE}."; fi
+  fi
+  query="$(build_vector_query 0)"
+  printf 'vector://%s@%s?%s' "$key" "$endpoint" "$query"
 }
 build_anywhere_query() {
   local up="$1" down="$2"
@@ -563,6 +616,24 @@ EOF
   systemctl daemon-reload
 }
 service_cmd() { require_root; require_systemd; systemctl "$1" "$SERVICE_NAME"; }
+run_nowhere_status() {
+  require_nowhere_version_at_least v2.1.2
+  "$BIN_PATH" status
+}
+run_probe() {
+  require_nowhere_version_at_least v2.1.2
+  local target="${1:-}" vector_url
+  if [[ -z "$target" ]]; then
+    [[ -t 0 ]] || die "Usage: sudo bash $SCRIPT_PATH probe <host:port>"
+    if is_chinese; then read -r -p "TCP 目标 host:port（IPv6 使用 [地址]:端口）: " target; else read -r -p "TCP target host:port (IPv6: [address]:port): " target; fi
+  fi
+  if ! validate_probe_target "$target"; then
+    if is_chinese; then die "目标格式无效，请输入 host:port，例如 example.com:443；IPv6 请使用 [2001:db8::1]:443。"; else die "Invalid target; use host:port (for example example.com:443) or [IPv6]:port."; fi
+  fi
+  vector_url="$(build_probe_vector_url)"
+  if is_chinese; then info "正在探测到 ${target} 的 TCP Flow 路径..."; else info "Probing the TCP Flow path to ${target}..."; fi
+  "$BIN_PATH" probe "$vector_url" "$target"
+}
 
 install_qrencode() {
   command -v qrencode >/dev/null 2>&1 && return 0
@@ -712,14 +783,16 @@ menu() {
   7) 启动服务
   8) 停止服务
   9) 重启服务
- 10) 查看状态
- 11) 打开终端界面
- 12) 查看实时日志
- 13) 打印客户端链接 / 二维码
- 14) 查看证书 SHA-256
- 15) 卸载服务
- 16) 切换语言
- 17) 更新部署脚本
+ 10) 查看 Nowhere 实例状态（2.1.2+）
+ 11) 测试 TCP 连通性（2.1.2+）
+ 12) 查看 systemd 服务状态
+ 13) 打开终端界面
+ 14) 查看实时日志
+ 15) 打印客户端链接 / 二维码
+ 16) 查看证书 SHA-256
+ 17) 卸载服务
+ 18) 切换语言
+ 19) 更新部署脚本
   0) 退出
 EOF
     else cat <<'EOF'
@@ -736,19 +809,21 @@ EOF
   7) Start service
   8) Stop service
   9) Restart service
- 10) Show status
- 11) Open Terminal UI
- 12) Follow logs
- 13) Print client links / QR code
-14) Show certificate SHA-256
-15) Uninstall
- 16) Switch language
- 17) Update deployment script
+ 10) Show Nowhere instance status (v2.1.2+)
+ 11) Probe TCP connectivity (v2.1.2+)
+ 12) Show systemd service status
+ 13) Open Terminal UI
+ 14) Follow logs
+ 15) Print client links / QR code
+ 16) Show certificate SHA-256
+ 17) Uninstall
+ 18) Switch language
+ 19) Update deployment script
   0) Exit
 EOF
     fi
     if is_chinese; then read -r -p "请选择: " choice; else read -r -p "Choose: " choice; fi
-    case "$choice" in 1) install_default ;; 2) install_vector ;; 3) quick_install ;; 4) configure_all ;; 5) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;; 6) update_all ;; 7) service_cmd start ;; 8) service_cmd stop ;; 9) service_cmd restart ;; 10) service_cmd status ;; 11) open_tui ;; 12) journalctl -u "$SERVICE_NAME" -f ;; 13) print_links ;; 14) print_tls_fingerprint || true ;; 15) uninstall_all ;; 16) change_language ;; 17) update_script ;; 0) exit 0 ;; *) is_chinese && warn "未知选项: ${choice}" || warn "Unknown option: ${choice}" ;; esac
+    case "$choice" in 1) install_default ;; 2) install_vector ;; 3) quick_install ;; 4) configure_all ;; 5) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;; 6) update_all ;; 7) service_cmd start ;; 8) service_cmd stop ;; 9) service_cmd restart ;; 10) run_nowhere_status || true ;; 11) run_probe || true ;; 12) service_cmd status ;; 13) open_tui ;; 14) journalctl -u "$SERVICE_NAME" -f ;; 15) print_links ;; 16) print_tls_fingerprint || true ;; 17) uninstall_all ;; 18) change_language ;; 19) update_script ;; 0) exit 0 ;; *) is_chinese && warn "未知选项: ${choice}" || warn "Unknown option: ${choice}" ;; esac
   done
 }
 
@@ -760,6 +835,8 @@ case "$ACTION" in
   update-script|script-update|self-update) update_script ;;
   versions|version|releases|release) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;;
   start|stop|restart|status) service_cmd "$ACTION" ;;
+  telemetry|instances|runtime-status) run_nowhere_status ;;
+  probe) run_probe "$PROBE_TARGET" ;;
   tui|dashboard|monitor) open_tui ;;
   logs|log) require_root; journalctl -u "$SERVICE_NAME" -f ;;
   link|links) print_links ;;
