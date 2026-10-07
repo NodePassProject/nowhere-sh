@@ -11,7 +11,7 @@ CONFIG_DIR="/etc/nowhere"
 CONFIG_FILE="${CONFIG_DIR}/nowhere.env"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-DEFAULT_VERSION="v2.2.0"
+DEFAULT_VERSION="v2.2.1"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
 DEFAULT_UDP_CARRIER="udp"
@@ -109,7 +109,7 @@ Usage:
   sudo bash nowhere-vps.sh install [--yes] [options]
   sudo bash nowhere-vps.sh install-vector [--yes] [options]
   sudo bash nowhere-vps.sh configure [options]
-  sudo bash nowhere-vps.sh update [--version v2.2.0]
+  sudo bash nowhere-vps.sh update [--version v2.2.1]
   sudo bash nowhere-vps.sh update-script
   sudo bash nowhere-vps.sh versions
   sudo bash nowhere-vps.sh start|stop|restart|status|telemetry|tui|logs|link|fingerprint|uninstall
@@ -117,12 +117,12 @@ Usage:
   sudo bash nowhere-vps.sh fingerprint nowhere://URL    (Nowhere v2.2.0+)
   sudo bash nowhere-vps.sh probe [host:port]
 
-This script supports Nowhere releases v2.0.0 and later. Press Enter in the wizard to keep defaults.
+This script supports Nowhere releases v2.0.0 and later, except v2.2.0. Press Enter in the wizard to keep defaults.
 
 Options:
   --client anywhere|vector|both
   --lang zh|en                    Wizard and menu language
-  --version v2.2.0
+  --version v2.2.1
   --key secret
   --public-host host              Client-facing domain or IP
   --anywhere-sni name|none        SNI for Anywhere links; none uses the public host
@@ -209,7 +209,7 @@ format_host_for_url() {
   printf '%s' "$host"
 }
 strip_brackets() { local host="${1:-}"; host="${host#[}"; printf '%s' "${host%]}"; }
-random_token() { openssl rand -hex 32; }
+random_token() { openssl rand -hex 16; }
 detect_public_host() {
   local host=""
   command -v curl >/dev/null 2>&1 && host="$(curl -4fsS --max-time 4 https://api.ipify.org 2>/dev/null || true)"
@@ -308,7 +308,7 @@ validate_ip_family() {
     *) return 1 ;;
   esac
 }
-validate_shared_key() { [[ "$1" =~ ^[0-9a-f]{64}$ ]]; }
+validate_shared_key() { [[ "$1" =~ ^[0-9a-f]{32,64}$ ]]; }
 validate_socks() {
   local value="$1" endpoint host port
   [[ "$value" == none || -z "$value" ]] && return 0
@@ -350,6 +350,12 @@ validate_release_version() {
   (( 10#$major >= 2 ))
 }
 require_supported_version() { validate_release_version "$1" || die "Only Nowhere releases v2.0.0 and later are supported."; }
+is_excluded_release() { [[ "$1" =~ ^v2\.2\.0([.-]|$) ]]; }
+require_deployable_version() {
+  require_supported_version "$1"
+  if is_excluded_release "$1"; then die "Nowhere v2.2.0 is excluded; use v2.2.1 or another supported release."; fi
+  return 0
+}
 validate_morph_tcp_prelude() { [[ "$1" == low7 || "$1" == full8 ]]; }
 version_at_least() {
   local version="${1#v}" minimum="${2#v}" version_major version_minor version_patch minimum_major minimum_minor minimum_patch value threshold
@@ -399,17 +405,17 @@ confirm_morph_upgrade() {
   [[ "$answer" == UPGRADE ]] || { warn "Update cancelled."; return 1; }
 }
 KEY_MIGRATED=0
-migrate_v22_listener_key() {
+migrate_v221_listener_key() {
   local version="$1" next_key portal_tail can_rotate=0
   KEY_MIGRATED=0
-  version_at_least "$version" v2.2.0 || return 0
+  version_at_least "$version" v2.2.1 || return 0
   if [[ "${NOWHERE_NEXT:-none}" != none ]]; then
     next_key="${NOWHERE_NEXT%%@*}"
     if ! validate_shared_key "$next_key"; then
       if is_chinese; then
-        warn "2.2.0 要求 next 密钥为 64 位小写十六进制。请先在上游 Portal 与此处配置相同的新密钥，再重新更新。"
+        warn "Nowhere 2.2.1 要求 next 密钥为 32–64 位小写十六进制。请先在上游 Portal 与此处配置相同的新密钥，再重新更新。"
       else
-        warn "Nowhere 2.2.0 requires a 64-character lowercase hex next key. Set the same new key on the upstream Portal and here, then retry."
+        warn "Nowhere 2.2.1 requires a 32–64-character lowercase hex next key. Set the same key on the upstream Portal and here, then retry."
       fi
       return 1
     fi
@@ -425,10 +431,10 @@ migrate_v22_listener_key() {
     return 1
   fi
   if is_chinese; then
-    warn "Nowhere 2.2.0 不接受当前 Portal 密钥；轮换后旧客户端链接将失效，需要重新导入。"
+    warn "Nowhere 2.2.1 不接受当前 Portal 密钥；轮换后旧客户端链接将失效，需要重新导入。"
     confirm_default_yes "生成新密钥并继续迁移？" || { warn "迁移已取消。"; return 1; }
   else
-    warn "Nowhere 2.2.0 rejects the current Portal key. Rotating it invalidates existing client links; clients must import the new link."
+    warn "Nowhere 2.2.1 rejects the current Portal key. Rotating it invalidates existing client links; clients must import the new link."
     confirm_default_yes "Generate a new key and continue the migration?" || { warn "Migration cancelled."; return 1; }
   fi
   NOWHERE_KEY="$(random_token)"
@@ -439,7 +445,7 @@ migrate_v22_listener_key() {
   fi
   KEY_MIGRATED=1
 }
-persist_v22_key_migration() {
+persist_v221_key_migration() {
   [[ "$KEY_MIGRATED" -eq 1 ]] || return 0
   write_config_assignment NOWHERE_PORTAL "$NOWHERE_PORTAL"
   write_config_assignment NOWHERE_KEY_VALUE "$NOWHERE_KEY"
@@ -487,11 +493,11 @@ persist_removed_event_log_migration() {
   write_config_assignment NOWHERE_VECTOR_LOG_VALUE "$NOWHERE_VECTOR_LOG_VALUE"
 }
 validate_config() {
-  require_supported_version "$NOWHERE_VERSION"
+  require_deployable_version "$NOWHERE_VERSION"
   NOWHERE_CLIENT="$(normalize_client "$NOWHERE_CLIENT")" || die "NOWHERE_CLIENT must be anywhere, vector, or both."
   [[ -n "$NOWHERE_KEY" && "${#NOWHERE_KEY}" -le 255 ]] || die "NOWHERE_KEY must contain 1..255 characters."
-  if version_at_least "$NOWHERE_VERSION" v2.2.0; then
-    validate_shared_key "$NOWHERE_KEY" || die "Nowhere v2.2.0 requires a 64-character lowercase hexadecimal Portal key."
+  if version_at_least "$NOWHERE_VERSION" v2.2.1; then
+    validate_shared_key "$NOWHERE_KEY" || die "Nowhere v2.2.1 requires a 32–64-character lowercase hexadecimal Portal key."
   fi
   validate_tcp_carrier "$NOWHERE_TCP_CARRIER" || die "NOWHERE_TCP_CARRIER must be tcp, tcp4, tcp6, or none."
   validate_udp_carrier "$NOWHERE_UDP_CARRIER" || die "NOWHERE_UDP_CARRIER must be udp, udp4, udp6, or none."
@@ -517,7 +523,7 @@ validate_config() {
   if [[ "$NOWHERE_NEXT" != none ]]; then
     [[ "$NOWHERE_SOCKS" == none ]] || die "Portal next and SOCKS outbound paths are mutually exclusive."
     [[ "$NOWHERE_NEXT" == *@* ]] || die "NOWHERE_NEXT must be key@host:port or an explicit carrier endpoint."
-    if version_at_least "$NOWHERE_VERSION" v2.2.0; then validate_shared_key "${NOWHERE_NEXT%%@*}" || die "Nowhere v2.2.0 requires a 64-character lowercase hexadecimal next key."; fi
+    if version_at_least "$NOWHERE_VERSION" v2.2.1; then validate_shared_key "${NOWHERE_NEXT%%@*}" || die "Nowhere v2.2.1 requires a 32–64-character lowercase hexadecimal next key."; fi
     validate_policy_for_endpoint "$NOWHERE_NEXT_UP" "$NOWHERE_NEXT_DOWN" || die "Invalid next route policy for enabled carriers."
     validate_bool "$NOWHERE_NEXT_MUX" && validate_sni "$NOWHERE_NEXT_SNI" && validate_pin "$NOWHERE_NEXT_PIN" || die "Invalid next Mux, SNI, or pin."
   fi
@@ -638,7 +644,7 @@ configure_values() {
   resolve_language
   generated_key="$(random_token)"; detected_host="$(detect_public_host)"
   NOWHERE_VERSION="${NOWHERE_VERSION:-${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}}"
-  require_supported_version "$NOWHERE_VERSION"
+  require_deployable_version "$NOWHERE_VERSION"
   NOWHERE_CLIENT="${NOWHERE_CLIENT:-${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}}"
   NOWHERE_PUBLIC_HOST="${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-$detected_host}}"
   NOWHERE_ANYWHERE_SNI="${NOWHERE_ANYWHERE_SNI:-${NOWHERE_ANYWHERE_SNI_VALUE:-none}}"
@@ -694,7 +700,7 @@ configure_values() {
     NOWHERE_LOG="$(prompt_value "Log level" "日志级别" "$NOWHERE_LOG")"; NOWHERE_TRANSPORT_MEMORY_PROFILE="$(prompt_value "Transport memory memory/balanced/throughput" "传输内存 memory/balanced/throughput" "$NOWHERE_TRANSPORT_MEMORY_PROFILE")"; NOWHERE_MIX_FALLBACK_TIMEOUT="$(prompt_value "Mix fallback timeout" "Mix 回退超时" "$NOWHERE_MIX_FALLBACK_TIMEOUT")"; NOWHERE_TELEMETRY_INTERVAL="$(prompt_value "TUI telemetry interval" "TUI 遥测间隔" "$NOWHERE_TELEMETRY_INTERVAL")"
     if [[ "$NOWHERE_CLIENT" == vector || "$NOWHERE_CLIENT" == both ]]; then NOWHERE_VECTOR_UP="$(prompt_value "Vector up tcp/udp/mix" "Vector 上行 tcp/udp/mix" "$NOWHERE_VECTOR_UP")"; NOWHERE_VECTOR_DOWN="$(prompt_value "Vector down tcp/udp/mix" "Vector 下行 tcp/udp/mix" "$NOWHERE_VECTOR_DOWN")"; NOWHERE_VECTOR_MUX="$(prompt_value "Vector Mux 0/1" "Vector Mux 0/1" "$NOWHERE_VECTOR_MUX")"; NOWHERE_VECTOR_SOCKS="$(prompt_value "Vector local SOCKS5" "Vector 本地 SOCKS5" "$NOWHERE_VECTOR_SOCKS")"; NOWHERE_VECTOR_SNI="$(prompt_value "Vector SNI/none" "Vector SNI/none" "$NOWHERE_VECTOR_SNI")"; NOWHERE_VECTOR_PIN="$(prompt_value "Vector certificate pin/none" "Vector 证书 Pin/none" "$NOWHERE_VECTOR_PIN")"; NOWHERE_VECTOR_RATE="$(prompt_value "Vector rate Mbps, 0=unlimited" "Vector 限速 Mbps，0=不限速" "$NOWHERE_VECTOR_RATE")"; NOWHERE_VECTOR_ETAR="$(prompt_value "Vector etar Mbps, 0=unlimited" "Vector Etar Mbps，0=不限速" "$NOWHERE_VECTOR_ETAR")"; NOWHERE_VECTOR_LOG="$(prompt_value "Vector log level" "Vector 日志级别" "$NOWHERE_VECTOR_LOG")"; fi
   fi
-  migrate_v22_listener_key "$NOWHERE_VERSION" || return 1
+  migrate_v221_listener_key "$NOWHERE_VERSION" || return 1
   validate_config
   NOWHERE_PORTAL="$(build_portal_url)"
 }
@@ -760,7 +766,7 @@ detect_asset() {
 }
 install_binary() {
   local version="$1" asset url tmpdir binary
-  require_supported_version "$version"; command -v curl >/dev/null 2>&1 || die "curl is required."; command -v tar >/dev/null 2>&1 || die "tar is required."
+  require_deployable_version "$version"; command -v curl >/dev/null 2>&1 || die "curl is required."; command -v tar >/dev/null 2>&1 || die "tar is required."
   asset="$(detect_asset)"; url="https://github.com/${REPO}/releases/download/${version}/${asset}"; tmpdir="$(mktemp -d)"; trap 'rm -rf "${tmpdir:-}"' RETURN
   info "Downloading ${asset} from ${REPO} ${version}..."; curl -fL --retry 3 --connect-timeout 10 -o "${tmpdir}/${asset}" "$url"; tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
   binary="$(find "$tmpdir" -type f -name nowhere -perm -u+x | head -n 1)"; [[ -n "$binary" ]] || binary="$(find "$tmpdir" -type f -name nowhere | head -n 1)"; [[ -n "$binary" ]] || die "Nowhere binary not found in release archive."
@@ -924,14 +930,15 @@ prompt_remote_fingerprint() {
 fetch_recent_releases() { curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPO}/releases?per_page=10" | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p'; }
 choose_release_version() {
   local releases=() item index choice
-  while IFS= read -r item; do validate_release_version "$item" && releases+=("$item"); done < <(fetch_recent_releases)
+  while IFS= read -r item; do validate_release_version "$item" && ! is_excluded_release "$item" && releases+=("$item"); done < <(fetch_recent_releases)
   [[ ${#releases[@]} -gt 0 ]] || die "No supported release found on GitHub."
   echo
   is_chinese && echo "最近的受支持 Nowhere Release：" || echo "Recent supported Nowhere releases:"
   for index in "${!releases[@]}"; do printf ' %2d) %s\n' "$((index + 1))" "${releases[$index]}"; done
   is_chinese && echo "  0) 取消" || echo "  0) Cancel"
   while true; do
-    if is_chinese; then read -r -p "请选择版本: " choice; else read -r -p "Choose a version: " choice; fi
+    if is_chinese; then read -r -p "请选择版本 [1]: " choice; else read -r -p "Choose a version [1]: " choice; fi
+    choice="${choice:-1}"
     [[ "$choice" == 0 ]] && return 1
     [[ "$choice" =~ ^[0-9]+$ ]] && (( 10#$choice >= 1 && 10#$choice <= ${#releases[@]} )) && { SELECTED_VERSION="${releases[$((10#$choice - 1))]}"; return; }
     is_chinese && warn "请输入 0..${#releases[@]}。" || warn "Enter 0..${#releases[@]}."
@@ -959,7 +966,7 @@ update_all() {
   [[ -n "${NOWHERE_VERSION_VALUE:-}" ]] || die "No installation config found."
   local selected
   if [[ "$VERSION_EXPLICIT" -eq 1 ]]; then selected="$NOWHERE_VERSION"; else choose_release_version || return; selected="$SELECTED_VERSION"; fi
-  require_supported_version "$selected"
+  require_deployable_version "$selected"
   confirm_morph_upgrade "$NOWHERE_VERSION_VALUE" "$selected" || return
   NOWHERE_VERSION="$selected"
   NOWHERE_KEY="${NOWHERE_KEY_VALUE:-}"
@@ -967,13 +974,13 @@ update_all() {
   NOWHERE_DIAL="${NOWHERE_DIAL_VALUE:-auto}"
   NOWHERE_DIAL4="${NOWHERE_DIAL4_VALUE:-auto}"
   NOWHERE_DIAL6="${NOWHERE_DIAL6_VALUE:-auto}"
-  migrate_v22_listener_key "$selected" || return
+  migrate_v221_listener_key "$selected" || return
   NOWHERE_LOG_VALUE="${NOWHERE_LOG_VALUE:-${NOWHERE_LOG:-$DEFAULT_LOG}}"
   NOWHERE_VECTOR_LOG_VALUE="${NOWHERE_VECTOR_LOG_VALUE:-${NOWHERE_VECTOR_LOG:-$DEFAULT_LOG}}"
   normalize_removed_event_logs
   persist_removed_event_log_migration
   install_binary "$selected"
-  persist_v22_key_migration
+  persist_v221_key_migration
   update_saved_version "$selected"
   systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
   info "Nowhere updated to ${selected}."

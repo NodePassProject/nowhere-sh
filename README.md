@@ -7,8 +7,9 @@ An interactive deployment and management script for a Linux VPS running
 
 ## Scope
 
-This script installs `v2.2.0` by default and supports current releases from
-`v2.0.0` onward. Release selection excludes V1 automatically. It generates
+The default install version is `v2.2.1`. The release picker lists supported
+Nowhere releases and omits V1; pressing Enter during update selects the latest
+listed release. It generates
 `nowhere://` links for Anywhere plus `vector://` URLs for the native Vector client.
 
 ## Features
@@ -20,7 +21,7 @@ This script installs `v2.2.0` by default and supports current releases from
 - Portal TLS modes, `morph`, rate limits, outbound SOCKS5, native `next` Portal
   chaining, Mux, SNI, certificate pinning, logs, TCP Morph prelude mode, and
   transport environment settings.
-- Nowhere 2.2 shared-key validation and migration, 64-character key generation,
+- Nowhere 2.2 shared-key validation and migration, 32-character key generation,
   independent `dial4`/`dial6` source binding, and remote certificate inspection.
 - Native Vector URL generation with fixed or `mix` routes, Mux, SNI, pin,
   rate limits, logs, and local SOCKS5 listener.
@@ -142,13 +143,14 @@ Nowhere `v2.1.1` removes the `event` log level. When updating or reconfiguring
 to `v2.1.1` or later, this script automatically changes a saved `event` level
 to `info`; older selected releases continue to accept `event`.
 
-Nowhere `v2.2.0` requires every Portal listener and enabled native `next` shared
-key to be exactly 64 lowercase hexadecimal characters. New installs generate
-keys in this format. When updating an older saved installation, the script
-offers to rotate an incompatible listener key; accepting invalidates its old
-client links, which must be imported again. Invalid `next` keys stop the update
-before replacing the binary. For a Portal chain, coordinate a fresh key for
-each hop and set the identical key on both ends before upgrading that hop.
+Nowhere `v2.2.1` requires every Portal listener and enabled native `next` shared
+key to be 32–64 lowercase hexadecimal characters. New installs generate a
+32-character key (16 random bytes); existing 64-character keys remain valid
+and are preserved. When updating an older saved installation, the script offers
+to rotate an incompatible listener key; accepting invalidates its old client
+links, which must be imported again. Invalid `next` keys stop the update before
+replacing the binary. For a Portal chain, coordinate a fresh key for each hop
+and set the identical key on both ends before upgrading that hop.
 The `nw2` wire contract remains compatible with `v2.1.2`; this is a key and
 certificate-trust configuration change, not a relay wire-protocol migration.
 
