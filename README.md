@@ -7,7 +7,7 @@ An interactive deployment and management script for a Linux VPS running
 
 ## Scope
 
-This script installs `v2.1.2` by default and supports current releases from
+This script installs `v2.2.0` by default and supports current releases from
 `v2.0.0` onward. Release selection excludes V1 automatically. It generates
 `nowhere://` links for Anywhere plus `vector://` URLs for the native Vector client.
 
@@ -20,6 +20,8 @@ This script installs `v2.1.2` by default and supports current releases from
 - Portal TLS modes, `morph`, rate limits, outbound SOCKS5, native `next` Portal
   chaining, Mux, SNI, certificate pinning, logs, TCP Morph prelude mode, and
   transport environment settings.
+- Nowhere 2.2 shared-key validation and migration, 64-character key generation,
+  independent `dial4`/`dial6` source binding, and remote certificate inspection.
 - Native Vector URL generation with fixed or `mix` routes, Mux, SNI, pin,
   rate limits, logs, and local SOCKS5 listener.
 - Anywhere TCP and UDP import links, plus a terminal QR code for the preferred
@@ -40,7 +42,7 @@ sudo bash nowhere-vps.sh
 ```
 
 On the first interactive run, choose English or Simplified Chinese. The choice
-is saved and can later be changed from menu item `16`, or selected explicitly
+is saved and can later be changed from menu item `20`, or selected explicitly
 with `--lang en` or `--lang zh`.
 
 The default install enables both unrestricted TCP and UDP carriers on port
@@ -65,9 +67,11 @@ group.
 14) Follow logs
 15) Print client links / QR code
 16) Show certificate SHA-256
-17) Uninstall
-18) Switch language
-19) Update deployment script
+17) Generate shared key (v2.2.0+)
+18) Inspect remote certificate fingerprint (v2.2.0+)
+19) Uninstall
+20) Switch language
+21) Update deployment script
 ```
 
 For non-interactive defaults:
@@ -99,6 +103,20 @@ portal://key@*/tcp:443/udp:8443?tls=1&morph=1
 suffixes are retained in native Vector URLs. Anywhere links use ordinary TCP
 and UDP routes.
 
+Portal outbound source binding supports either the legacy single-family `dial`
+mode or the Nowhere 2.2 `dial4`/`dial6` mode. The modes are mutually exclusive;
+`dial4` and `dial6` may be configured independently or together. Use bare local
+IP addresses, without brackets or ports:
+
+```bash
+sudo bash nowhere-vps.sh configure --dial4 192.0.2.10 --dial6 2001:db8::10
+```
+
+These options affect Portal outbound connections, including direct, SOCKS5,
+and native `next` paths. They do not change inbound listeners or standalone
+Vector/probe source selection. Explicit bindings do not silently fall back to
+automatic source selection.
+
 ## Portal Outbound Paths
 
 Portal can connect to targets directly, through an outbound SOCKS5 proxy, or via
@@ -124,9 +142,27 @@ Nowhere `v2.1.1` removes the `event` log level. When updating or reconfiguring
 to `v2.1.1` or later, this script automatically changes a saved `event` level
 to `info`; older selected releases continue to accept `event`.
 
+Nowhere `v2.2.0` requires every Portal listener and enabled native `next` shared
+key to be exactly 64 lowercase hexadecimal characters. New installs generate
+keys in this format. When updating an older saved installation, the script
+offers to rotate an incompatible listener key; accepting invalidates its old
+client links, which must be imported again. Invalid `next` keys stop the update
+before replacing the binary. For a Portal chain, coordinate a fresh key for
+each hop and set the identical key on both ends before upgrading that hop.
+The `nw2` wire contract remains compatible with `v2.1.2`; this is a key and
+certificate-trust configuration change, not a relay wire-protocol migration.
+
+Nowhere 2.2 also verifies certificate chains and names by default for Native
+Vector, `probe`, and native `next` connections. `sni=none` does not disable
+verification. A self-signed certificate needs its exact SHA-256 pin. For the
+default in-memory self-signed certificate, this script adds the current pin to
+generated Vector URLs when available; that pin changes whenever the service
+restarts. Use a stable CA-trusted PEM certificate for links that should survive
+restarts.
+
 For TCP Morph connections initiated by the local Nowhere process, choose the
-client-side prelude mode with `--morph-tcp-prelude low7|full8`. `low7` is the
-default and is appropriate for most deployments. This setting affects native
+client-side prelude mode with `--morph-tcp-prelude low7|full8`. `full8` is the
+default in Nowhere 2.2; `low7` remains available. This setting affects native
 outbound connections such as `next`; it is not included in Anywhere import
 links.
 
@@ -157,6 +193,27 @@ restart; a PEM fingerprint changes when that certificate is renewed.
 sudo bash nowhere-vps.sh fingerprint
 ```
 
+Nowhere 2.2 Native Vector links include a current self-signed certificate pin
+when the fingerprint is available. Anywhere `nowhere://` links do not carry a
+pin parameter; add the displayed SHA-256 fingerprint to Anywhere's Trusted
+Certificates when using a self-signed certificate. The in-memory certificate
+is regenerated after every service restart, so its trusted fingerprint must
+then be refreshed. For a self-signed PEM certificate, set `--pin` for Native
+Vector or `--next-pin` for a native Portal chain.
+
+Generate a key or inspect a remote Portal certificate with the Nowhere 2.2
+utilities:
+
+```bash
+sudo bash nowhere-vps.sh generate-key
+sudo bash nowhere-vps.sh fingerprint 'nowhere://key@proxy.example.com:2077?morph=1'
+```
+
+Remote fingerprint inspection sends no Portal authentication or application
+traffic. Verify the reported value through a trusted channel before pinning it.
+These wrapper commands require the local Nowhere binary to be installed at
+`v2.2.0` or later.
+
 For a supplied certificate use absolute paths:
 
 ```bash
@@ -184,6 +241,8 @@ sudo bash nowhere-vps.sh tui
 sudo bash nowhere-vps.sh logs
 sudo bash nowhere-vps.sh link
 sudo bash nowhere-vps.sh fingerprint
+sudo bash nowhere-vps.sh fingerprint 'nowhere://key@host:2077'
+sudo bash nowhere-vps.sh generate-key
 sudo bash nowhere-vps.sh uninstall
 ```
 

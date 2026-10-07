@@ -7,7 +7,7 @@
 
 ## 支持范围
 
-脚本默认安装 `v2.1.2`，支持 `v2.0.0` 及之后的当前 Release；指定版本列表会自动
+脚本默认安装 `v2.2.0`，支持 `v2.0.0` 及之后的当前 Release；指定版本列表会自动
 排除 V1。脚本输出 Anywhere 的 `nowhere://` 链接和 Native Vector 的 `vector://` URL。
 
 ## 功能
@@ -18,6 +18,8 @@
   `tcp4`、`tcp6`、`udp4`、`udp6` 地址族限制。
 - 支持 Portal TLS、`morph`、TCP Morph 前导模式、限速、出站 SOCKS5、原生
   `next` Portal 链路、Mux、SNI、证书 Pin、日志与传输环境参数。
+- 支持 Nowhere 2.2 共享密钥校验与迁移、64 位密钥生成、独立 `dial4/dial6`
+  出站源地址绑定，以及远端证书指纹查询。
 - 支持 Native Vector 固定路由或 `mix`、Mux、SNI、Pin、限速、日志和本地
   SOCKS5 监听。
 - 输出 Anywhere 的 TCP、UDP 导入链接，并为优先可用链路生成终端二维码。
@@ -34,7 +36,7 @@ chmod +x nowhere-vps.sh
 sudo bash nowhere-vps.sh
 ```
 
-首次交互运行时可选择 English 或简体中文，选择会保存下来；之后可在菜单第 `16`
+首次交互运行时可选择 English 或简体中文，选择会保存下来；之后可在菜单第 `20`
 项切换，也可用 `--lang en` 或 `--lang zh` 显式指定语言。
 
 默认安装会在 `2077` 同时启用无限制 TCP 和 UDP carrier，使用临时自签证书，
@@ -57,9 +59,11 @@ sudo bash nowhere-vps.sh
 14) 查看日志
 15) 打印客户端链接 / 二维码
 16) 查看证书 SHA-256
-17) 卸载服务
-18) 切换语言
-19) 更新部署脚本
+17) 生成共享密钥（2.2.0+）
+18) 查询远端证书指纹（2.2.0+）
+19) 卸载服务
+20) 切换语言
+21) 更新部署脚本
 ```
 
 非交互默认安装：
@@ -89,6 +93,18 @@ portal://key@*/tcp:443/udp:8443?tls=1&morph=1
 `tcp4`、`udp6` 用于把对应 carrier 限制为 IPv4 或 IPv6。Native Vector URL 会保留
 这些高级限制；Anywhere 链接使用普通 TCP、UDP 固定路由。
 
+Portal 出站源地址支持两种互斥模式：旧的单地址 `dial`，或 Nowhere 2.2 新增的
+`dial4/dial6`。后者可分别设置，也可同时设置。请填写本机 IP 字面值，不要加方括号
+或端口：
+
+```bash
+sudo bash nowhere-vps.sh configure --dial4 192.0.2.10 --dial6 2001:db8::10
+```
+
+这些参数影响 Portal 对外建立的连接，包括直连、SOCKS5 和原生 `next`；不改变入站
+监听地址，也不控制独立运行的 Vector 或连通性探测。指定源地址绑定失败时不会静默
+回退到系统自动选择。
+
 ## Portal 出站路径
 
 Portal 可直连目标、经由出站 SOCKS5，或连接下一个原生 Portal。向导中选择
@@ -111,9 +127,21 @@ Vector 节点和原生 `next` 跳板。
 Nowhere `v2.1.1` 移除了 `event` 日志级别。更新或重配到 `v2.1.1` 及之后版本时，
 脚本会自动将已保存的 `event` 改为 `info`；选择较早版本时仍允许使用 `event`。
 
+Nowhere `v2.2.0` 要求 Portal 监听密钥和启用的原生 `next` 密钥都必须是恰好 64 位的
+小写十六进制。新安装会生成这种格式的密钥。更新旧安装时，如果当前监听密钥不兼容，
+脚本会询问是否轮换；接受后旧客户端链接会失效，需要重新导入。若 `next` 密钥不合规，
+脚本会在替换二进制前停止更新。存在 Portal 链路时，请先为每一跳确定新密钥，并在
+链路两端配置完全相同的值，再升级对应节点。
+`nw2` 线路格式仍兼容 `v2.1.2`；这次更新不需要迁移中继协议，只需处理密钥与证书信任配置。
+
+2.2 默认对 Native Vector、`probe` 和原生 `next` 校验证书链与名称；`sni=none` 不会
+关闭校验。自签证书必须提供准确的 SHA-256 pin。默认的内存自签证书在服务每次重启后
+都会变化；若能取得当前指纹，脚本会将 pin 自动写入生成的 Vector 链接。希望链接稳定
+时建议使用受信任 CA 签发的 PEM 证书。
+
 本机 Nowhere 进程主动发起的 TCP Morph 连接可用
-`--morph-tcp-prelude low7|full8` 选择前导模式，默认 `low7`，大多数场景无需
-调整。它影响原生 `next` 等出站连接，不会写入 Anywhere 导入链接。
+`--morph-tcp-prelude low7|full8` 选择前导模式；Nowhere 2.2 默认 `full8`，仍可选择
+`low7`。它影响原生 `next` 等出站连接，不会写入 Anywhere 导入链接。
 
 ## 客户端链接
 
@@ -139,6 +167,23 @@ Nowhere 日志读取，因此 PEM 证书热重载后也能显示当前指纹。�
 ```bash
 sudo bash nowhere-vps.sh fingerprint
 ```
+
+Nowhere 2.2 下，脚本会在可取得当前指纹时把自签证书 pin 加入 Native Vector 链接。
+Anywhere 的 `nowhere://` 链接不支持携带 pin 参数；使用自签证书时，请把上面显示的
+SHA-256 指纹添加到 Anywhere 的 Trusted Certificates。内存证书每次重启都会重新生成，
+届时需要更新受信任指纹。自签 PEM 证书则需分别通过 `--pin` 设置 Vector pin，或通过
+`--next-pin` 设置原生 Portal 链路的 pin。
+
+可使用 Nowhere 2.2 工具生成密钥或查看远端 Portal 证书指纹：
+
+```bash
+sudo bash nowhere-vps.sh generate-key
+sudo bash nowhere-vps.sh fingerprint 'nowhere://key@proxy.example.com:2077?morph=1'
+```
+
+远端指纹查询不会发送 Portal 身份验证或应用数据。固定证书前，应通过可信渠道核对
+查询结果。
+这两个封装命令要求本机已安装 Nowhere `v2.2.0` 或更新版本。
 
 使用自有 PEM 证书时填写绝对路径：
 
@@ -167,6 +212,8 @@ sudo bash nowhere-vps.sh tui
 sudo bash nowhere-vps.sh logs
 sudo bash nowhere-vps.sh link
 sudo bash nowhere-vps.sh fingerprint
+sudo bash nowhere-vps.sh fingerprint 'nowhere://key@host:2077'
+sudo bash nowhere-vps.sh generate-key
 sudo bash nowhere-vps.sh uninstall
 ```
 
