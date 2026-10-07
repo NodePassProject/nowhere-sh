@@ -171,6 +171,18 @@ links.
 Anywhere links are generated separately for TCP and UDP, so they stay within
 its supported fixed-route model. Native Vector supports the full policy set:
 
+Anywhere SNI defaults to the public host in the link. Set `--anywhere-sni` when
+the client-facing address differs from the certificate's DNS name; the script
+adds an encoded `sni` parameter to the Anywhere links. The interactive wizard
+also offers this setting when Anywhere output is enabled. For example:
+
+```bash
+sudo bash nowhere-vps.sh configure \
+  --public-host 203.0.113.10 --anywhere-sni proxy.example.com
+```
+
+SNI does not replace trusting a self-signed certificate fingerprint in Anywhere.
+
 ```bash
 sudo bash nowhere-vps.sh install-vector \
   --vector-up mix --vector-down mix --mux 1

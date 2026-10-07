@@ -53,6 +53,7 @@ while [[ $# -gt 0 ]]; do
     --client) NOWHERE_CLIENT="${2:?missing --client value}"; shift 2 ;;
     --key) NOWHERE_KEY="${2:?missing --key value}"; shift 2 ;;
     --public-host) NOWHERE_PUBLIC_HOST="${2:?missing --public-host value}"; shift 2 ;;
+    --anywhere-sni) NOWHERE_ANYWHERE_SNI="${2:?missing --anywhere-sni value}"; shift 2 ;;
     --listen-host) NOWHERE_LISTEN_HOST="${2:?missing --listen-host value}"; shift 2 ;;
     --tcp-carrier) NOWHERE_TCP_CARRIER="${2:?missing --tcp-carrier value}"; shift 2 ;;
     --tcp-port) NOWHERE_TCP_PORT="${2:?missing --tcp-port value}"; shift 2 ;;
@@ -124,6 +125,7 @@ Options:
   --version v2.2.0
   --key secret
   --public-host host              Client-facing domain or IP
+  --anywhere-sni name|none        SNI for Anywhere links; none uses the public host
   --listen-host host              Portal bind host; empty binds wildcard addresses
   --tcp-carrier tcp|tcp4|tcp6|none
   --tcp-port 2077
@@ -499,6 +501,7 @@ validate_config() {
   [[ "$NOWHERE_TLS" == 1 || "$NOWHERE_TLS" == 2 ]] || die "NOWHERE_TLS must be 1 or 2."
   validate_bool "$NOWHERE_MORPH" || die "NOWHERE_MORPH must be 0 or 1."
   validate_language "$NOWHERE_LANG" || die "NOWHERE_LANG must be zh or en."
+  validate_sni "$NOWHERE_ANYWHERE_SNI" || die "NOWHERE_ANYWHERE_SNI must be a DNS name or none."
   validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "NOWHERE_MORPH_TCP_PRELUDE must be low7 or full8."
   validate_nonnegative_int "$NOWHERE_RATE" && validate_nonnegative_int "$NOWHERE_ETAR" || die "Rate limits must be non-negative integers."
   validate_socks "$NOWHERE_SOCKS" || die "Invalid NOWHERE_SOCKS value."
@@ -623,7 +626,10 @@ build_probe_vector_url() {
 }
 build_anywhere_query() {
   local up="$1" down="$2"
+  local sni="${NOWHERE_ANYWHERE_SNI_VALUE:-${NOWHERE_ANYWHERE_SNI:-none}}"
+  local public_host="${NOWHERE_PUBLIC_HOST_VALUE:-${NOWHERE_PUBLIC_HOST:-}}"
   printf 'up=%s&down=%s&morph=%s&mux=%s' "$up" "$down" "${NOWHERE_MORPH_VALUE:-$DEFAULT_MORPH}" "${NOWHERE_VECTOR_MUX_VALUE:-$DEFAULT_MUX}"
+  if [[ "$sni" != none && "$sni" != "$public_host" ]]; then printf '&sni=%s' "$(urlencode "$sni")"; fi
 }
 
 configure_values() {
@@ -635,6 +641,7 @@ configure_values() {
   require_supported_version "$NOWHERE_VERSION"
   NOWHERE_CLIENT="${NOWHERE_CLIENT:-${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}}"
   NOWHERE_PUBLIC_HOST="${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-$detected_host}}"
+  NOWHERE_ANYWHERE_SNI="${NOWHERE_ANYWHERE_SNI:-${NOWHERE_ANYWHERE_SNI_VALUE:-none}}"
   NOWHERE_LISTEN_HOST="${NOWHERE_LISTEN_HOST:-${NOWHERE_LISTEN_HOST_VALUE:-}}"
   NOWHERE_KEY="${NOWHERE_KEY:-${NOWHERE_KEY_VALUE:-$generated_key}}"
   NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER:-${NOWHERE_TCP_CARRIER_VALUE:-$DEFAULT_TCP_CARRIER}}"
@@ -663,7 +670,9 @@ configure_values() {
   if [[ "$ASSUME_YES" -eq 0 ]]; then
     is_chinese && info "Nowhere 配置向导。直接回车保留默认值。" || info "Nowhere configuration wizard. Press Enter to keep defaults."
     NOWHERE_CLIENT="$(prompt_value "Client output anywhere/vector/both" "客户端输出 anywhere/vector/both" "$NOWHERE_CLIENT")"
-    NOWHERE_PUBLIC_HOST="$(prompt_value "Public domain/IP" "公网域名或 IP" "$NOWHERE_PUBLIC_HOST")"; NOWHERE_LISTEN_HOST="$(prompt_value "Listen host, empty means wildcard" "监听地址，留空监听全部地址" "$NOWHERE_LISTEN_HOST")"
+    NOWHERE_PUBLIC_HOST="$(prompt_value "Public domain/IP" "公网域名或 IP" "$NOWHERE_PUBLIC_HOST")"
+    if [[ "$NOWHERE_CLIENT" == anywhere || "$NOWHERE_CLIENT" == both ]]; then NOWHERE_ANYWHERE_SNI="$(prompt_value "Anywhere SNI (none=use public host)" "Anywhere SNI（none=使用链接主机名）" "$NOWHERE_ANYWHERE_SNI")"; fi
+    NOWHERE_LISTEN_HOST="$(prompt_value "Listen host, empty means wildcard" "监听地址，留空监听全部地址" "$NOWHERE_LISTEN_HOST")"
     NOWHERE_TCP_CARRIER="$(prompt_value "TCP carrier tcp/tcp4/tcp6/none" "TCP 载体 tcp/tcp4/tcp6/none" "$NOWHERE_TCP_CARRIER")"
     [[ "$NOWHERE_TCP_CARRIER" == none ]] || NOWHERE_TCP_PORT="$(prompt_value "TCP port" "TCP 端口" "$NOWHERE_TCP_PORT")"
     NOWHERE_UDP_CARRIER="$(prompt_value "UDP carrier udp/udp4/udp6/none" "UDP 载体 udp/udp4/udp6/none" "$NOWHERE_UDP_CARRIER")"
@@ -698,6 +707,7 @@ NOWHERE_LANG_VALUE=$(env_quote "$NOWHERE_LANG")
 NOWHERE_VERSION_VALUE=$(env_quote "$NOWHERE_VERSION")
 NOWHERE_CLIENT_VALUE=$(env_quote "$NOWHERE_CLIENT")
 NOWHERE_PUBLIC_HOST_VALUE=$(env_quote "$NOWHERE_PUBLIC_HOST")
+NOWHERE_ANYWHERE_SNI_VALUE=$(env_quote "$NOWHERE_ANYWHERE_SNI")
 NOWHERE_LISTEN_HOST_VALUE=$(env_quote "$NOWHERE_LISTEN_HOST")
 NOWHERE_KEY_VALUE=$(env_quote "$NOWHERE_KEY")
 NOWHERE_TCP_CARRIER_VALUE=$(env_quote "$NOWHERE_TCP_CARRIER")

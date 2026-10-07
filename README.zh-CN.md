@@ -148,6 +148,17 @@ Nowhere `v2.2.0` 要求 Portal 监听密钥和启用的原生 `next` 密钥都�
 Anywhere 会分别生成 TCP 与 UDP 链接，保持在其支持的固定路由范围内。Native
 Vector 支持完整路由策略，例如：
 
+Anywhere 链接默认使用链接中的公网主机名作为 SNI。若分享地址是 IP、证书签发给
+另一个域名，可通过 `--anywhere-sni` 指定证书域名，脚本会将其编码后加入 Anywhere
+链接。交互向导在启用 Anywhere 输出时也会询问此项。示例：
+
+```bash
+sudo bash nowhere-vps.sh configure \
+  --public-host 203.0.113.10 --anywhere-sni proxy.example.com
+```
+
+SNI 不能代替在 Anywhere 中信任自签证书指纹。
+
 ```bash
 sudo bash nowhere-vps.sh install-vector \
   --vector-up mix --vector-down mix --mux 1
