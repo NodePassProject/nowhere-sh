@@ -11,7 +11,8 @@ CONFIG_DIR="/etc/nowhere"
 CONFIG_FILE="${CONFIG_DIR}/nowhere.env"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-DEFAULT_VERSION="v2.2.1"
+DEFAULT_VERSION="v3.0.0"
+NW2_LTS_VERSION="v2.2.1"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
 DEFAULT_UDP_CARRIER="udp"
@@ -31,7 +32,23 @@ DEFAULT_TELEMETRY_INTERVAL="1s"
 
 ASSUME_YES=0
 VERSION_EXPLICIT=0
-ALLOW_MORPH_BREAKING_UPGRADE=0
+KEY_EXPLICIT=0
+[[ ${NOWHERE_KEY+x} ]] && KEY_EXPLICIT=1
+ALLOW_PROTOCOL_BREAKING_UPGRADE=0
+ROLE_EXPLICIT=0
+OUT_EXPLICIT=0
+PUBLIC_HOST_EXPLICIT=0
+LISTEN_HOST_EXPLICIT=0
+TCP_CARRIER_EXPLICIT=0
+TCP_PORT_EXPLICIT=0
+UDP_CARRIER_EXPLICIT=0
+UDP_PORT_EXPLICIT=0
+[[ ${NOWHERE_PUBLIC_HOST+x} ]] && PUBLIC_HOST_EXPLICIT=1
+[[ ${NOWHERE_LISTEN_HOST+x} ]] && LISTEN_HOST_EXPLICIT=1
+[[ ${NOWHERE_TCP_CARRIER+x} ]] && TCP_CARRIER_EXPLICIT=1
+[[ ${NOWHERE_TCP_PORT+x} ]] && TCP_PORT_EXPLICIT=1
+[[ ${NOWHERE_UDP_CARRIER+x} ]] && UDP_CARRIER_EXPLICIT=1
+[[ ${NOWHERE_UDP_PORT+x} ]] && UDP_PORT_EXPLICIT=1
 DIAL_EXPLICIT=0
 [[ ${NOWHERE_DIAL+x} ]] && DIAL_EXPLICIT=1
 DIAL4_EXPLICIT=0
@@ -50,21 +67,29 @@ while [[ $# -gt 0 ]]; do
     -y|--yes) ASSUME_YES=1; shift ;;
     --lang) NOWHERE_LANG="${2:?missing --lang value}"; shift 2 ;;
     --version) NOWHERE_VERSION="${2:?missing --version value}"; VERSION_EXPLICIT=1; shift 2 ;;
+    --role) NOWHERE_ROLE="${2:?missing --role value}"; ROLE_EXPLICIT=1; shift 2 ;;
+    --allow-protocol-breaking-upgrade) ALLOW_PROTOCOL_BREAKING_UPGRADE=1; shift ;;
+    --out) NOWHERE_OUT="${2:?missing --out value}"; OUT_EXPLICIT=1; shift 2 ;;
+    --out-socks) NOWHERE_OUT_SOCKS="${2:?missing --out-socks value}"; shift 2 ;;
+    --egress-portal-host) NOWHERE_EGRESS_PORTAL_HOST="${2:?missing --egress-portal-host value}"; shift 2 ;;
+    --egress-portal-udp-carrier) NOWHERE_EGRESS_PORTAL_UDP_CARRIER="${2:?missing --egress-portal-udp-carrier value}"; shift 2 ;;
+    --egress-portal-udp-port) NOWHERE_EGRESS_PORTAL_UDP_PORT="${2:?missing --egress-portal-udp-port value}"; shift 2 ;;
+    --egress-sni) NOWHERE_EGRESS_SNI="${2:?missing --egress-sni value}"; shift 2 ;;
+    --egress-pin) NOWHERE_EGRESS_PIN="${2:?missing --egress-pin value}"; shift 2 ;;
     --client) NOWHERE_CLIENT="${2:?missing --client value}"; shift 2 ;;
-    --key) NOWHERE_KEY="${2:?missing --key value}"; shift 2 ;;
-    --public-host) NOWHERE_PUBLIC_HOST="${2:?missing --public-host value}"; shift 2 ;;
+    --key) NOWHERE_KEY="${2:?missing --key value}"; KEY_EXPLICIT=1; shift 2 ;;
+    --public-host) NOWHERE_PUBLIC_HOST="${2:?missing --public-host value}"; PUBLIC_HOST_EXPLICIT=1; shift 2 ;;
     --anywhere-sni) NOWHERE_ANYWHERE_SNI="${2:?missing --anywhere-sni value}"; shift 2 ;;
-    --listen-host) NOWHERE_LISTEN_HOST="${2:?missing --listen-host value}"; shift 2 ;;
-    --tcp-carrier) NOWHERE_TCP_CARRIER="${2:?missing --tcp-carrier value}"; shift 2 ;;
-    --tcp-port) NOWHERE_TCP_PORT="${2:?missing --tcp-port value}"; shift 2 ;;
-    --udp-carrier) NOWHERE_UDP_CARRIER="${2:?missing --udp-carrier value}"; shift 2 ;;
-    --udp-port) NOWHERE_UDP_PORT="${2:?missing --udp-port value}"; shift 2 ;;
+    --listen-host) NOWHERE_LISTEN_HOST="${2:?missing --listen-host value}"; LISTEN_HOST_EXPLICIT=1; shift 2 ;;
+    --tcp-carrier) NOWHERE_TCP_CARRIER="${2:?missing --tcp-carrier value}"; TCP_CARRIER_EXPLICIT=1; shift 2 ;;
+    --tcp-port) NOWHERE_TCP_PORT="${2:?missing --tcp-port value}"; TCP_PORT_EXPLICIT=1; shift 2 ;;
+    --udp-carrier) NOWHERE_UDP_CARRIER="${2:?missing --udp-carrier value}"; UDP_CARRIER_EXPLICIT=1; shift 2 ;;
+    --udp-port) NOWHERE_UDP_PORT="${2:?missing --udp-port value}"; UDP_PORT_EXPLICIT=1; shift 2 ;;
     --tls) NOWHERE_TLS="${2:?missing --tls value}"; shift 2 ;;
     --crt|--cert) NOWHERE_CRT="${2:?missing --crt value}"; shift 2 ;;
     --tls-key) NOWHERE_TLS_KEY="${2:?missing --tls-key value}"; shift 2 ;;
     --morph) NOWHERE_MORPH="${2:?missing --morph value}"; shift 2 ;;
     --morph-tcp-prelude) NOWHERE_MORPH_TCP_PRELUDE="${2:?missing --morph-tcp-prelude value}"; shift 2 ;;
-    --allow-morph-breaking-upgrade) ALLOW_MORPH_BREAKING_UPGRADE=1; shift ;;
     --rate) NOWHERE_RATE="${2:?missing --rate value}"; shift 2 ;;
     --etar) NOWHERE_ETAR="${2:?missing --etar value}"; shift 2 ;;
     --dial) NOWHERE_DIAL="${2:?missing --dial value}"; DIAL_EXPLICIT=1; shift 2 ;;
@@ -108,24 +133,34 @@ Usage:
   sudo bash nowhere-vps.sh
   sudo bash nowhere-vps.sh install [--yes] [options]
   sudo bash nowhere-vps.sh install-vector [--yes] [options]
+  sudo bash nowhere-vps.sh install-egress [--yes] [options]
   sudo bash nowhere-vps.sh configure [options]
-  sudo bash nowhere-vps.sh update [--version v2.2.1]
+  sudo bash nowhere-vps.sh update [--version v3.0.0 or v2.2.1]
   sudo bash nowhere-vps.sh update-script
   sudo bash nowhere-vps.sh versions
-  sudo bash nowhere-vps.sh start|stop|restart|status|telemetry|tui|logs|link|fingerprint|uninstall
-  sudo bash nowhere-vps.sh generate-key                 (Nowhere v2.2.0+)
-  sudo bash nowhere-vps.sh fingerprint nowhere://URL    (Nowhere v2.2.0+)
+  sudo bash nowhere-vps.sh start|stop|restart|status|telemetry|logs|link|fingerprint|uninstall
+  sudo bash nowhere-vps.sh tui                          (NW2 only)
+  sudo bash nowhere-vps.sh generate-key                 (NW2 LTS / NW3)
+  sudo bash nowhere-vps.sh fingerprint nowhere://URL    (NW2 LTS / NW3)
   sudo bash nowhere-vps.sh probe [host:port]
 
-This script supports Nowhere releases v2.0.0 and later, except v2.2.0. Press Enter in the wizard to keep defaults.
+New installs use NW3 by default. NW2 remains available at its v2.2.1 LTS baseline. Press Enter in the wizard to keep defaults.
 
 Options:
   --client anywhere|vector|both
   --lang zh|en                    Wizard and menu language
-  --version v2.2.1
+  --version v3.0.0 or v2.2.1 (or another stable NW3 release)
+  --role portal|egress           NW3 service role
+  --out direct|socks|egress      NW3 Portal target path
+  --out-socks [user:pass@]host:port
+  --egress-portal-host host      Portal host for an NW3 Egress service
+  --egress-portal-udp-carrier udp|udp4|udp6
+  --egress-portal-udp-port 2077
+  --egress-sni name|none --egress-pin sha256|none
+  --allow-protocol-breaking-upgrade  Confirm NW2/NW3 cutover after coordinating peers
   --key secret
   --public-host host              Client-facing domain or IP
-  --anywhere-sni name|none        SNI for Anywhere links; none uses the public host
+  --anywhere-sni name|none        NW2 SNI for Anywhere links
   --listen-host host              Portal bind host; empty binds wildcard addresses
   --tcp-carrier tcp|tcp4|tcp6|none
   --tcp-port 2077
@@ -134,17 +169,16 @@ Options:
   --tls 1|2                       1=self-signed, 2=PEM certificate
   --crt /absolute/certificate.pem --tls-key /absolute/private.key
   --morph 0|1
-  --morph-tcp-prelude low7|full8    TCP Morph prelude for native next connections
-  --allow-morph-breaking-upgrade    Confirm a Morph upgrade from v2.0.x to v2.1+
+  --morph-tcp-prelude low7|full8    TCP Morph prelude for native TLS connections
   --rate 0 --etar 0 --dial auto|IP --log info
-  --dial4 auto|IPv4 --dial6 auto|IPv6 (v2.2+, exclusive with --dial)
-  --socks none|[user:pass@]host:port
-  --next key@host:port            Native Portal upstream; mutually exclusive with socks
-  --next-up tcp|udp|mix --next-down tcp|udp|mix --next-mux 0|1
-  --next-sni name|none --next-pin sha256|none
-  --vector-up tcp|udp|mix --vector-down tcp|udp|mix --mux 0|1
-  --vector-socks 127.0.0.1:1080 --vector-rate 0 --vector-etar 0 --vector-log info
-  --sni name|none --pin sha256|none
+  --dial4 auto|IPv4 --dial6 auto|IPv6 (exclusive with --dial)
+  --socks none|[user:pass@]host:port (NW2 Portal SOCKS5 upstream)
+  --next key@host:port (NW2 native Portal upstream; exclusive with --socks)
+  --next-up tcp|udp|mix --next-down tcp|udp|mix --next-mux 0|1 (NW2)
+  --next-sni name|none --next-pin sha256|none (NW2)
+  --vector-up tcp|udp|mix --vector-down tcp|udp|mix --mux 0|1 (NW2)
+  --vector-socks 127.0.0.1:1080 --vector-rate 0 --vector-etar 0
+  --sni name|none --pin sha256|none (Vector)
   --transport-memory-profile memory|balanced|throughput
   --mix-fallback-timeout 1s
   --telemetry-interval 1s
@@ -158,7 +192,11 @@ require_systemd() {
   command -v systemctl >/dev/null 2>&1 || die "systemctl is required."
   [[ -d /run/systemd/system ]] || warn "systemd does not appear to be running; service commands may fail."
 }
-load_config() { [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE" || true; }
+load_config() {
+  [[ -f "$CONFIG_FILE" ]] && source "$CONFIG_FILE" || true
+  NOWHERE_SERVICE_URL="${NOWHERE_SERVICE_URL:-${NOWHERE_PORTAL:-}}"
+  NOWHERE_ROLE_VALUE="${NOWHERE_ROLE_VALUE:-portal}"
+}
 validate_language() { [[ "$1" == zh || "$1" == en ]]; }
 default_language() {
   case "${LC_ALL:-${LANG:-}}" in zh_*|zh.*) printf zh ;; *) printf en ;; esac
@@ -187,6 +225,8 @@ env_quote() {
   local value="${1//$'\n'/}"
   value="${value//\\/\\\\}"
   value="${value//\"/\\\"}"
+  value="${value//\$/\\\$}"
+  value="${value//\`/\\\`}"
   printf '"%s"' "$value"
 }
 urlencode() {
@@ -309,16 +349,39 @@ validate_ip_family() {
   esac
 }
 validate_shared_key() { [[ "$1" =~ ^[0-9a-f]{32,64}$ ]]; }
+validate_nw3_key() { [[ "$1" =~ ^[0-9a-f]{32}$ ]]; }
+validate_key_for_version() {
+  if is_nw3_version "$1"; then validate_nw3_key "$2"; else validate_shared_key "$2"; fi
+}
 validate_socks() {
-  local value="$1" endpoint host port
+  local value="$1" endpoint host port credentials username password
   [[ "$value" == none || -z "$value" ]] && return 0
   [[ "$value" != *[[:space:]]* ]] || return 1
+  if [[ "$value" == *@* ]]; then
+    credentials="${value%@*}"
+    [[ "$credentials" == *:* ]] || return 1
+    username="${credentials%%:*}"; password="${credentials#*:}"
+    [[ -n "$username" && -n "$password" ]] || return 1
+  fi
   endpoint="${value##*@}"
   if [[ "$endpoint" == \[*\]:* ]]; then host="${endpoint#\[}"; host="${host%%\]:*}"; port="${endpoint##*\]:}"; else host="${endpoint%:*}"; port="${endpoint##*:}"; fi
   [[ -n "$host" ]] && validate_port "$port"
 }
+encode_socks_query_value() {
+  local value="$1" credentials endpoint username password
+  if [[ "$value" != *@* ]]; then urlencode "$value"; return; fi
+  credentials="${value%@*}"; endpoint="${value##*@}"
+  username="${credentials%%:*}"; password="${credentials#*:}"
+  printf '%s:%s@%s' "$(urlencode "$username")" "$(urlencode "$password")" "$(urlencode "$endpoint")"
+}
 validate_vector_socks() { [[ "$1" != none && -n "$1" ]] && validate_socks "$1"; }
-carrier_for_policy() { [[ "$1" == tcp ]] && [[ "$NOWHERE_TCP_CARRIER" != none ]] || [[ "$1" == udp ]] && [[ "$NOWHERE_UDP_CARRIER" != none ]]; }
+carrier_for_policy() {
+  case "$1" in
+    tcp) [[ "$NOWHERE_TCP_CARRIER" != none ]] ;;
+    udp) [[ "$NOWHERE_UDP_CARRIER" != none ]] ;;
+    *) return 1 ;;
+  esac
+}
 validate_policy_for_endpoint() {
   local up="$1" down="$2"
   validate_policy "$up" && validate_policy "$down" || return 1
@@ -334,7 +397,6 @@ validate_dial_settings() {
     else return 1; fi
   fi
   if [[ "$dial4" != auto || "$dial6" != auto ]]; then
-    version_at_least "$NOWHERE_VERSION" v2.2.0 || return 1
     [[ "$NOWHERE_DIAL" == auto && "$DIAL_EXPLICIT" -eq 0 ]] || return 1
     [[ "$dial4" == auto ]] || validate_ip_family 4 "$dial4" || return 1
     [[ "$dial6" == auto ]] || { validate_ipv6_literal "$dial6" && ! is_ipv4_mapped_ipv6 "$dial6"; } || return 1
@@ -344,97 +406,91 @@ normalize_client() { case "$1" in anywhere|vector|both) printf '%s' "$1" ;; *) r
 client_label() { case "$1" in anywhere) printf 'Anywhere' ;; vector) printf 'Native Vector' ;; both) printf 'Anywhere + Native Vector' ;; esac; }
 
 validate_release_version() {
-  local version="${1#v}" major
-  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9._-]+)?$ ]] || return 1
-  version="${version%%-*}"; IFS=. read -r major _ <<<"$version"
-  (( 10#$major >= 2 ))
+  local major
+  [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  if [[ "$major" == 2 ]]; then [[ "$1" == "$NW2_LTS_VERSION" ]]; return; fi
+  [[ "$major" == 3 ]]
 }
-require_supported_version() { validate_release_version "$1" || die "Only Nowhere releases v2.0.0 and later are supported."; }
-is_excluded_release() { [[ "$1" =~ ^v2\.2\.0([.-]|$) ]]; }
+validate_installed_version() {
+  local major
+  [[ "$1" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || return 1
+  major="${BASH_REMATCH[1]}"
+  [[ "$major" == 2 || "$major" == 3 ]]
+}
+require_supported_version() { validate_release_version "$1" || die "Supported Nowhere releases are v${NW2_LTS_VERSION#v} (NW2 LTS) and stable NW3 releases."; }
+require_supported_installed_version() { validate_installed_version "$1" || die "Only stable NW2 and NW3 installations are recognized."; }
+is_nw3_version() { [[ "$1" =~ ^v3\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; }
 require_deployable_version() {
   require_supported_version "$1"
-  if is_excluded_release "$1"; then die "Nowhere v2.2.0 is excluded; use v2.2.1 or another supported release."; fi
   return 0
 }
 validate_morph_tcp_prelude() { [[ "$1" == low7 || "$1" == full8 ]]; }
-version_at_least() {
-  local version="${1#v}" minimum="${2#v}" version_major version_minor version_patch minimum_major minimum_minor minimum_patch value threshold
-  version="${version%%-*}"; minimum="${minimum%%-*}"
-  IFS=. read -r version_major version_minor version_patch <<<"$version"
-  IFS=. read -r minimum_major minimum_minor minimum_patch <<<"$minimum"
-  for value in "$version_major:$minimum_major" "$version_minor:$minimum_minor" "$version_patch:$minimum_patch"; do
-    threshold="${value#*:}"; value="${value%%:*}"
-    (( 10#$value > 10#$threshold )) && return 0
-    (( 10#$value < 10#$threshold )) && return 1
-  done
-  return 0
-}
-require_nowhere_version_at_least() {
-  local minimum="$1" installed
+require_supported_nowhere() {
+  local installed
   require_root
   [[ -x "$BIN_PATH" ]] || die "Nowhere is not installed."
   load_config
   installed="${NOWHERE_VERSION_VALUE:-}"
   [[ -n "$installed" ]] || die "No installation config found."
-  require_supported_version "$installed"
-  version_at_least "$installed" "$minimum" && return 0
-  if is_chinese; then die "此命令需要 Nowhere ${minimum} 或更高版本，请先更新 Nowhere 二进制。"; else die "This command requires Nowhere ${minimum} or later; update the Nowhere binary first."; fi
+  require_supported_installed_version "$installed"
 }
 validate_log_level() {
-  if version_at_least "$NOWHERE_VERSION" v2.1.1; then
-    [[ "$1" =~ ^(none|debug|info|warn|error)$ ]]
-  else
-    [[ "$1" =~ ^(none|debug|info|warn|error|event)$ ]]
-  fi
+  [[ "$1" =~ ^(none|debug|info|warn|error)$ ]]
 }
-is_morph_upgrade_boundary() {
-  [[ "${NOWHERE_MORPH_VALUE:-$DEFAULT_MORPH}" == 1 ]] || return 1
-  version_at_least "$2" v2.1.0 && ! version_at_least "$1" v2.1.0
-}
-confirm_morph_upgrade() {
-  local current="$1" selected="$2" answer
-  is_morph_upgrade_boundary "$current" "$selected" || return 0
-  warn "Morph protocol changes in v2.1 are incompatible with v2.0.x Morph peers."
-  warn "Upgrade every client, native next hop, and Vector node using morph=1 before restarting this Portal."
-  if [[ "$ALLOW_MORPH_BREAKING_UPGRADE" -eq 1 ]]; then
-    warn "Proceeding because --allow-morph-breaking-upgrade was supplied."
+confirm_protocol_upgrade() {
+  local current="$1" selected="$2" answer current_profile target_profile
+  if is_nw3_version "$current"; then current_profile=nw3; else current_profile=nw2; fi
+  if is_nw3_version "$selected"; then target_profile=nw3; else target_profile=nw2; fi
+  [[ "$current_profile" == "$target_profile" ]] && return 0
+  warn "NW2 and NW3 use incompatible wire protocols; all peers on the traffic path must be switched together."
+  warn "This operation rebuilds the service URL and client links for the selected protocol generation."
+  if [[ "$ALLOW_PROTOCOL_BREAKING_UPGRADE" -eq 1 ]]; then
+    warn "Proceeding because --allow-protocol-breaking-upgrade was supplied."
     return 0
   fi
-  [[ -t 0 ]] || die "Refusing non-interactive Morph upgrade. Add --allow-morph-breaking-upgrade after coordinating peer upgrades."
-  read -r -p "Type UPGRADE to continue: " answer
-  [[ "$answer" == UPGRADE ]] || { warn "Update cancelled."; return 1; }
+  [[ "$ASSUME_YES" -eq 0 && -t 0 ]] || die "Refusing non-interactive NW2/NW3 migration. Coordinate every peer, then add --allow-protocol-breaking-upgrade."
+  read -r -p "Type MIGRATE to continue: " answer
+  [[ "$answer" == MIGRATE ]] || { warn "Update cancelled."; return 1; }
 }
 KEY_MIGRATED=0
-migrate_v221_listener_key() {
+migrate_shared_key_for_version() {
   local version="$1" next_key portal_tail can_rotate=0
   KEY_MIGRATED=0
-  version_at_least "$version" v2.2.1 || return 0
+  require_supported_version "$version"
   if [[ "${NOWHERE_NEXT:-none}" != none ]]; then
+    if is_nw3_version "$version"; then
+      if is_chinese; then warn "NW3 已移除原生 next 参数；请在向导中改用 direct、SOCKS5 或 Egress 出口。"; else warn "NW3 removes native next; choose direct, SOCKS5, or Egress in the wizard."; fi
+      return 1
+    fi
     next_key="${NOWHERE_NEXT%%@*}"
-    if ! validate_shared_key "$next_key"; then
+    if ! validate_key_for_version "$version" "$next_key"; then
       if is_chinese; then
-        warn "Nowhere 2.2.1 要求 next 密钥为 32–64 位小写十六进制。请先在上游 Portal 与此处配置相同的新密钥，再重新更新。"
+        warn "目标版本要求 next 密钥为 32–64 位小写十六进制。请先在上游 Portal 与此处配置相同的新密钥，再重新更新。"
       else
-        warn "Nowhere 2.2.1 requires a 32–64-character lowercase hex next key. Set the same key on the upstream Portal and here, then retry."
+        warn "The target release requires a compatible lowercase hexadecimal next key. Set the same key on the upstream Portal and here, then retry."
       fi
       return 1
     fi
   fi
-  validate_shared_key "${NOWHERE_KEY:-}" && return 0
+  validate_key_for_version "$version" "${NOWHERE_KEY:-}" && return 0
   if [[ "${KEY_MIGRATION_FORCE:-0}" == 1 ]]; then
     can_rotate=1
-  elif [[ -n "${NOWHERE_KEY_VALUE:-}" && "$NOWHERE_KEY" == "$NOWHERE_KEY_VALUE" ]] && ! version_at_least "${NOWHERE_VERSION_VALUE:-v2.0.0}" v2.2.0; then
-    can_rotate=1
+  elif [[ -n "${NOWHERE_KEY_VALUE:-}" && "$NOWHERE_KEY" == "$NOWHERE_KEY_VALUE" ]]; then
+    if [[ "$version" == "$NW2_LTS_VERSION" && "${NOWHERE_VERSION_VALUE:-$NW2_LTS_VERSION}" != "$NW2_LTS_VERSION" ]] ||
+      { is_nw3_version "$version" && ! is_nw3_version "${NOWHERE_VERSION_VALUE:-$NW2_LTS_VERSION}"; }; then
+      can_rotate=1
+    fi
   fi
   if [[ "$can_rotate" -ne 1 ]]; then
     if is_chinese; then warn "当前共享密钥格式不兼容，且无法安全自动迁移。请先通过“修改配置”设置新密钥，再更新。"; else warn "The saved Portal key is incompatible and cannot be migrated automatically. Set a new key through Reconfigure, then retry the update."; fi
     return 1
   fi
   if is_chinese; then
-    warn "Nowhere 2.2.1 不接受当前 Portal 密钥；轮换后旧客户端链接将失效，需要重新导入。"
+    warn "目标版本不接受当前 Portal 密钥格式；轮换后旧客户端链接将失效，需要重新导入。"
     confirm_default_yes "生成新密钥并继续迁移？" || { warn "迁移已取消。"; return 1; }
   else
-    warn "Nowhere 2.2.1 rejects the current Portal key. Rotating it invalidates existing client links; clients must import the new link."
+    warn "The target release rejects the current Portal key format. Rotating it invalidates existing client links; clients must import the new link."
     confirm_default_yes "Generate a new key and continue the migration?" || { warn "Migration cancelled."; return 1; }
   fi
   NOWHERE_KEY="$(random_token)"
@@ -442,18 +498,19 @@ migrate_v221_listener_key() {
   if [[ "${NOWHERE_PORTAL:-}" == portal://*@* ]]; then
     portal_tail="${NOWHERE_PORTAL#*@}"
     NOWHERE_PORTAL="portal://${NOWHERE_KEY}@${portal_tail}"
+    NOWHERE_SERVICE_URL="$NOWHERE_PORTAL"
   fi
   KEY_MIGRATED=1
 }
-persist_v221_key_migration() {
+persist_shared_key_migration() {
   [[ "$KEY_MIGRATED" -eq 1 ]] || return 0
   write_config_assignment NOWHERE_PORTAL "$NOWHERE_PORTAL"
+  write_config_assignment NOWHERE_SERVICE_URL "${NOWHERE_SERVICE_URL:-$NOWHERE_PORTAL}"
   write_config_assignment NOWHERE_KEY_VALUE "$NOWHERE_KEY"
 }
 REMOVED_EVENT_LOG_MIGRATED=0
 normalize_removed_event_logs() {
   REMOVED_EVENT_LOG_MIGRATED=0
-  version_at_least "$NOWHERE_VERSION" v2.1.1 || return 0
   if [[ "${NOWHERE_LOG_VALUE:-${NOWHERE_LOG:-}}" == event || "${NOWHERE_LOG:-}" == event ]]; then
     NOWHERE_LOG_VALUE=info; NOWHERE_LOG=info; REMOVED_EVENT_LOG_MIGRATED=1
   fi
@@ -462,10 +519,11 @@ normalize_removed_event_logs() {
   fi
   if [[ "${NOWHERE_PORTAL:-}" == *log=event* ]]; then
     NOWHERE_PORTAL="${NOWHERE_PORTAL//log=event/log=info}"
+    NOWHERE_SERVICE_URL="$NOWHERE_PORTAL"
     REMOVED_EVENT_LOG_MIGRATED=1
   fi
   if [[ "$REMOVED_EVENT_LOG_MIGRATED" -eq 1 ]]; then
-    if is_chinese; then warn "Nowhere v2.1.1 已移除 event 日志级别，旧设置已自动改为 info。"; else warn "Nowhere v2.1.1 removed the event log level; legacy settings were changed to info."; fi
+    if is_chinese; then warn "当前受支持版本不再使用 event 日志级别，旧设置已自动改为 info。"; else warn "Supported releases do not use the event log level; legacy settings were changed to info."; fi
   fi
 }
 escape_sed_replacement() {
@@ -489,6 +547,7 @@ write_config_assignment() {
 persist_removed_event_log_migration() {
   [[ "$REMOVED_EVENT_LOG_MIGRATED" -eq 1 ]] || return 0
   write_config_assignment NOWHERE_PORTAL "${NOWHERE_PORTAL:-}"
+  write_config_assignment NOWHERE_SERVICE_URL "${NOWHERE_SERVICE_URL:-${NOWHERE_PORTAL:-}}"
   write_config_assignment NOWHERE_LOG_VALUE "$NOWHERE_LOG_VALUE"
   write_config_assignment NOWHERE_VECTOR_LOG_VALUE "$NOWHERE_VECTOR_LOG_VALUE"
 }
@@ -496,9 +555,7 @@ validate_config() {
   require_deployable_version "$NOWHERE_VERSION"
   NOWHERE_CLIENT="$(normalize_client "$NOWHERE_CLIENT")" || die "NOWHERE_CLIENT must be anywhere, vector, or both."
   [[ -n "$NOWHERE_KEY" && "${#NOWHERE_KEY}" -le 255 ]] || die "NOWHERE_KEY must contain 1..255 characters."
-  if version_at_least "$NOWHERE_VERSION" v2.2.1; then
-    validate_shared_key "$NOWHERE_KEY" || die "Nowhere v2.2.1 requires a 32–64-character lowercase hexadecimal Portal key."
-  fi
+  validate_shared_key "$NOWHERE_KEY" || die "The NW2 LTS requires a 32–64-character lowercase hexadecimal Portal key."
   validate_tcp_carrier "$NOWHERE_TCP_CARRIER" || die "NOWHERE_TCP_CARRIER must be tcp, tcp4, tcp6, or none."
   validate_udp_carrier "$NOWHERE_UDP_CARRIER" || die "NOWHERE_UDP_CARRIER must be udp, udp4, udp6, or none."
   [[ "$NOWHERE_TCP_CARRIER" != none || "$NOWHERE_UDP_CARRIER" != none ]] || die "Enable at least one carrier."
@@ -511,7 +568,7 @@ validate_config() {
   validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "NOWHERE_MORPH_TCP_PRELUDE must be low7 or full8."
   validate_nonnegative_int "$NOWHERE_RATE" && validate_nonnegative_int "$NOWHERE_ETAR" || die "Rate limits must be non-negative integers."
   validate_socks "$NOWHERE_SOCKS" || die "Invalid NOWHERE_SOCKS value."
-  validate_dial_settings || die "Invalid outbound dial settings. Use one --dial IP, or Nowhere v2.2.0+ --dial4/--dial6 IP values; dial modes are mutually exclusive."
+  validate_dial_settings || die "Invalid outbound dial settings. Use one --dial IP or the mutually exclusive --dial4/--dial6 options."
   validate_log_level "$NOWHERE_LOG" || die "Invalid log level for Nowhere ${NOWHERE_VERSION}."
   validate_profile "$NOWHERE_TRANSPORT_MEMORY_PROFILE" || die "Invalid transport memory profile."
   validate_duration "$NOWHERE_MIX_FALLBACK_TIMEOUT" || die "Invalid mix fallback timeout."
@@ -523,7 +580,7 @@ validate_config() {
   if [[ "$NOWHERE_NEXT" != none ]]; then
     [[ "$NOWHERE_SOCKS" == none ]] || die "Portal next and SOCKS outbound paths are mutually exclusive."
     [[ "$NOWHERE_NEXT" == *@* ]] || die "NOWHERE_NEXT must be key@host:port or an explicit carrier endpoint."
-    if version_at_least "$NOWHERE_VERSION" v2.2.1; then validate_shared_key "${NOWHERE_NEXT%%@*}" || die "Nowhere v2.2.1 requires a 32–64-character lowercase hexadecimal next key."; fi
+    validate_shared_key "${NOWHERE_NEXT%%@*}" || die "The NW2 LTS requires a 32–64-character lowercase hexadecimal next key."
     validate_policy_for_endpoint "$NOWHERE_NEXT_UP" "$NOWHERE_NEXT_DOWN" || die "Invalid next route policy for enabled carriers."
     validate_bool "$NOWHERE_NEXT_MUX" && validate_sni "$NOWHERE_NEXT_SNI" && validate_pin "$NOWHERE_NEXT_PIN" || die "Invalid next Mux, SNI, or pin."
   fi
@@ -580,10 +637,25 @@ build_vector_query() {
   local up="${NOWHERE_VECTOR_UP_VALUE:-${NOWHERE_VECTOR_UP:-tcp}}" down="${NOWHERE_VECTOR_DOWN_VALUE:-${NOWHERE_VECTOR_DOWN:-tcp}}" mux="${NOWHERE_VECTOR_MUX_VALUE:-${NOWHERE_VECTOR_MUX:-$DEFAULT_MUX}}"
   local sni="${NOWHERE_VECTOR_SNI_VALUE:-${NOWHERE_VECTOR_SNI:-$DEFAULT_SNI}}" pin="${NOWHERE_VECTOR_PIN_VALUE:-${NOWHERE_VECTOR_PIN:-$DEFAULT_PIN}}" morph="${NOWHERE_MORPH_VALUE:-${NOWHERE_MORPH:-$DEFAULT_MORPH}}"
   local socks="${NOWHERE_VECTOR_SOCKS_VALUE:-${NOWHERE_VECTOR_SOCKS:-$DEFAULT_VECTOR_SOCKS}}" rate="${NOWHERE_VECTOR_RATE_VALUE:-${NOWHERE_VECTOR_RATE:-0}}" etar="${NOWHERE_VECTOR_ETAR_VALUE:-${NOWHERE_VECTOR_ETAR:-0}}" log="${NOWHERE_VECTOR_LOG_VALUE:-${NOWHERE_VECTOR_LOG:-$DEFAULT_LOG}}"
-  local version="${NOWHERE_VERSION_VALUE:-${NOWHERE_VERSION:-$DEFAULT_VERSION}}" tls="${NOWHERE_TLS_VALUE:-${NOWHERE_TLS:-$DEFAULT_TLS}}" fingerprint
-  if version_at_least "$version" v2.2.0 && [[ "$tls" == 1 && "$pin" == none ]]; then
+  local version="${NOWHERE_VERSION_VALUE:-${NOWHERE_VERSION:-$DEFAULT_VERSION}}" tls="${NOWHERE_TLS_VALUE:-${NOWHERE_TLS:-$DEFAULT_TLS}}" fingerprint query
+  if is_nw3_version "$version"; then
+    if [[ "$tls" == 1 && "$pin" == none ]]; then
+      fingerprint="$(current_local_tls_fingerprint || true)"
+      [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || { warn "Cannot create a verified NW3 self-signed client URL: certificate fingerprint is unavailable. Check the Nowhere service logs."; return 1; }
+      pin="$fingerprint"
+    fi
+    query="morph=${morph}"
+    [[ "$include_socks" != 1 ]] || query="in=$(encode_socks_query_value "$socks")&${query}"
+    [[ "$sni" == none ]] || query="${query}&sni=$(urlencode "$sni")"
+    [[ "$pin" == none ]] || query="${query}&pin=${pin}"
+    [[ "$rate" == 0 ]] || query="${query}&rate=${rate}"
+    [[ "$etar" == 0 ]] || query="${query}&etar=${etar}"
+    printf '%s' "$query"
+    return
+  fi
+  if [[ "$tls" == 1 && "$pin" == none ]]; then
     fingerprint="$(current_local_tls_fingerprint || true)"
-    [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || { warn "Cannot create a verified v2.2 self-signed client URL: certificate fingerprint is unavailable. Check the Nowhere service logs."; return 1; }
+    [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || { warn "Cannot create a verified self-signed client URL: certificate fingerprint is unavailable. Check the Nowhere service logs."; return 1; }
     pin="$fingerprint"
   fi
   local query="up=${up}&down=${down}&mux=${mux}"
@@ -609,6 +681,7 @@ validate_probe_target() {
 }
 build_probe_vector_url() {
   load_config
+  [[ "${NOWHERE_ROLE_VALUE:-portal}" != egress ]] || die "TCP probe is only available from a Portal deployment."
   [[ -n "${NOWHERE_KEY_VALUE:-}" ]] || die "No configuration found."
   local public_host="${NOWHERE_PUBLIC_HOST_VALUE:-}" host key endpoint query
   [[ -n "$public_host" ]] || die "Public host is empty. Reconfigure the service."
@@ -616,6 +689,16 @@ build_probe_vector_url() {
   [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" != none || "${NOWHERE_UDP_CARRIER_VALUE:-none}" != none ]] || die "No carrier is enabled."
   host="$(format_host_for_url "$public_host")"
   key="$(urlencode "$NOWHERE_KEY_VALUE")"
+  if is_nw3_version "${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; then
+    if [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" != none ]]; then
+      endpoint="$(build_endpoint "$host" "${NOWHERE_TCP_CARRIER_VALUE}" "${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}" none "$DEFAULT_PORT")"
+    else
+      endpoint="$(build_endpoint "$host" none "$DEFAULT_PORT" "${NOWHERE_UDP_CARRIER_VALUE}" "${NOWHERE_UDP_PORT_VALUE:-$DEFAULT_PORT}")"
+    fi
+    query="$(build_vector_query 0)"
+    printf 'vector://%s@%s?%s' "$key" "$endpoint" "$query"
+    return
+  fi
   endpoint="$(build_endpoint "$host" "${NOWHERE_TCP_CARRIER_VALUE:-none}" "${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}" "${NOWHERE_UDP_CARRIER_VALUE:-none}" "${NOWHERE_UDP_PORT_VALUE:-$DEFAULT_PORT}")"
 
   local NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER_VALUE:-none}"
@@ -645,6 +728,9 @@ configure_values() {
   generated_key="$(random_token)"; detected_host="$(detect_public_host)"
   NOWHERE_VERSION="${NOWHERE_VERSION:-${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}}"
   require_deployable_version "$NOWHERE_VERSION"
+  if is_nw3_version "$NOWHERE_VERSION"; then configure_nw3_values "$generated_key" "$detected_host"; return; fi
+  [[ "${NOWHERE_ROLE:-${NOWHERE_ROLE_VALUE:-portal}}" != egress ]] || die "NW2 has no Egress role; choose an NW3 release or configure a Portal role."
+  NOWHERE_ROLE=portal
   NOWHERE_CLIENT="${NOWHERE_CLIENT:-${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}}"
   NOWHERE_PUBLIC_HOST="${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-$detected_host}}"
   NOWHERE_ANYWHERE_SNI="${NOWHERE_ANYWHERE_SNI:-${NOWHERE_ANYWHERE_SNI_VALUE:-none}}"
@@ -691,26 +777,268 @@ configure_values() {
     NOWHERE_DIAL="$(prompt_value "Outbound source IP (dial), auto=system default" "出站源 IP（dial），auto=系统默认" "$NOWHERE_DIAL")"
     [[ "$NOWHERE_DIAL" == auto ]] || DIAL_EXPLICIT=1
     if [[ "$NOWHERE_DIAL" != auto ]]; then NOWHERE_DIAL4=auto; NOWHERE_DIAL6=auto; fi
-    if [[ "$NOWHERE_DIAL" == auto && "$DIAL_EXPLICIT" -eq 0 ]] && { version_at_least "$NOWHERE_VERSION" v2.2.0 || [[ "$NOWHERE_DIAL4" != auto || "$NOWHERE_DIAL6" != auto ]]; }; then
+    if [[ "$NOWHERE_DIAL" == auto && "$DIAL_EXPLICIT" -eq 0 ]]; then
       NOWHERE_DIAL4="$(prompt_value "IPv4 outbound source (dial4)" "IPv4 出站源地址（dial4）" "$NOWHERE_DIAL4")"
       NOWHERE_DIAL6="$(prompt_value "IPv6 outbound source (dial6)" "IPv6 出站源地址（dial6）" "$NOWHERE_DIAL6")"
     fi
-    path="$(prompt_value "Outbound path direct/socks/next" "出站路径 direct/socks/next" "$([[ "$NOWHERE_NEXT" != none ]] && printf next || [[ "$NOWHERE_SOCKS" != none ]] && printf socks || printf direct)")"
+    path=direct
+    if [[ "$NOWHERE_NEXT" != none ]]; then path=next; elif [[ "$NOWHERE_SOCKS" != none ]]; then path=socks; fi
+    path="$(prompt_value "Outbound path direct/socks/next" "出站路径 direct/socks/next" "$path")"
     case "$path" in direct) NOWHERE_SOCKS=none; NOWHERE_NEXT=none ;; socks) NOWHERE_NEXT=none; NOWHERE_SOCKS="$(prompt_value "Outbound SOCKS5" "出站 SOCKS5" "$NOWHERE_SOCKS")" ;; next) NOWHERE_SOCKS=none; NOWHERE_NEXT="$(prompt_value "Next key@endpoint" "下一跳 key@endpoint" "$NOWHERE_NEXT")"; NOWHERE_NEXT_UP="$(prompt_value "Next up tcp/udp/mix" "下一跳上行 tcp/udp/mix" "$NOWHERE_NEXT_UP")"; NOWHERE_NEXT_DOWN="$(prompt_value "Next down tcp/udp/mix" "下一跳下行 tcp/udp/mix" "$NOWHERE_NEXT_DOWN")"; NOWHERE_NEXT_MUX="$(prompt_value "Next Mux 0/1" "下一跳 Mux 0/1" "$NOWHERE_NEXT_MUX")"; NOWHERE_NEXT_SNI="$(prompt_value "Next SNI/none" "下一跳 SNI/none" "$NOWHERE_NEXT_SNI")"; NOWHERE_NEXT_PIN="$(prompt_value "Next certificate pin/none" "下一跳证书 Pin/none" "$NOWHERE_NEXT_PIN")" ;; *) die "Outbound path must be direct, socks, or next." ;; esac
     NOWHERE_LOG="$(prompt_value "Log level" "日志级别" "$NOWHERE_LOG")"; NOWHERE_TRANSPORT_MEMORY_PROFILE="$(prompt_value "Transport memory memory/balanced/throughput" "传输内存 memory/balanced/throughput" "$NOWHERE_TRANSPORT_MEMORY_PROFILE")"; NOWHERE_MIX_FALLBACK_TIMEOUT="$(prompt_value "Mix fallback timeout" "Mix 回退超时" "$NOWHERE_MIX_FALLBACK_TIMEOUT")"; NOWHERE_TELEMETRY_INTERVAL="$(prompt_value "TUI telemetry interval" "TUI 遥测间隔" "$NOWHERE_TELEMETRY_INTERVAL")"
     if [[ "$NOWHERE_CLIENT" == vector || "$NOWHERE_CLIENT" == both ]]; then NOWHERE_VECTOR_UP="$(prompt_value "Vector up tcp/udp/mix" "Vector 上行 tcp/udp/mix" "$NOWHERE_VECTOR_UP")"; NOWHERE_VECTOR_DOWN="$(prompt_value "Vector down tcp/udp/mix" "Vector 下行 tcp/udp/mix" "$NOWHERE_VECTOR_DOWN")"; NOWHERE_VECTOR_MUX="$(prompt_value "Vector Mux 0/1" "Vector Mux 0/1" "$NOWHERE_VECTOR_MUX")"; NOWHERE_VECTOR_SOCKS="$(prompt_value "Vector local SOCKS5" "Vector 本地 SOCKS5" "$NOWHERE_VECTOR_SOCKS")"; NOWHERE_VECTOR_SNI="$(prompt_value "Vector SNI/none" "Vector SNI/none" "$NOWHERE_VECTOR_SNI")"; NOWHERE_VECTOR_PIN="$(prompt_value "Vector certificate pin/none" "Vector 证书 Pin/none" "$NOWHERE_VECTOR_PIN")"; NOWHERE_VECTOR_RATE="$(prompt_value "Vector rate Mbps, 0=unlimited" "Vector 限速 Mbps，0=不限速" "$NOWHERE_VECTOR_RATE")"; NOWHERE_VECTOR_ETAR="$(prompt_value "Vector etar Mbps, 0=unlimited" "Vector Etar Mbps，0=不限速" "$NOWHERE_VECTOR_ETAR")"; NOWHERE_VECTOR_LOG="$(prompt_value "Vector log level" "Vector 日志级别" "$NOWHERE_VECTOR_LOG")"; fi
   fi
-  migrate_v221_listener_key "$NOWHERE_VERSION" || return 1
+  migrate_shared_key_for_version "$NOWHERE_VERSION" || return 1
   validate_config
   NOWHERE_PORTAL="$(build_portal_url)"
+  NOWHERE_SERVICE_URL="$NOWHERE_PORTAL"
+}
+
+validate_nw3_config() {
+  require_deployable_version "$NOWHERE_VERSION"
+  validate_nw3_key "$NOWHERE_KEY" || die "NW3 shared keys must be exactly 32 lowercase hexadecimal characters."
+  validate_bool "$NOWHERE_MORPH" || die "Morph must be 0 or 1."
+  validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "TCP Morph prelude must be low7 or full8."
+  validate_profile "$NOWHERE_TRANSPORT_MEMORY_PROFILE" || die "Invalid transport memory profile."
+  validate_nonnegative_int "$NOWHERE_RATE" && validate_nonnegative_int "$NOWHERE_ETAR" || die "Rate limits must be non-negative integers."
+  validate_dial_settings || die "Invalid outbound source binding; dial is exclusive with dial4/dial6."
+  case "$NOWHERE_ROLE" in
+    portal)
+      NOWHERE_CLIENT="$(normalize_client "$NOWHERE_CLIENT")" || die "NOWHERE_CLIENT must be anywhere, vector, or both."
+      [[ -n "$NOWHERE_PUBLIC_HOST" ]] || die "Portal requires a public domain or IP for client links."
+      case "$NOWHERE_PUBLIC_HOST" in '*'|0.0.0.0|::|'[::]') die "Portal client links require a concrete public host." ;; esac
+      validate_tcp_carrier "$NOWHERE_TCP_CARRIER" && validate_udp_carrier "$NOWHERE_UDP_CARRIER" || die "Invalid Portal carrier."
+      [[ "$NOWHERE_TCP_CARRIER" != none || "$NOWHERE_UDP_CARRIER" != none ]] || die "Enable at least one Portal carrier."
+      [[ "$NOWHERE_TCP_CARRIER" == none ]] || validate_port "$NOWHERE_TCP_PORT" || die "Invalid TCP port."
+      [[ "$NOWHERE_UDP_CARRIER" == none ]] || validate_port "$NOWHERE_UDP_PORT" || die "Invalid UDP port."
+      [[ "$NOWHERE_TLS" == 1 || "$NOWHERE_TLS" == 2 ]] || die "TLS must be 1 or 2."
+      if [[ "$NOWHERE_TLS" == 2 ]]; then
+        [[ -n "$NOWHERE_CRT" && -n "$NOWHERE_TLS_KEY" ]] || die "tls=2 requires crt and key paths."
+        [[ -f "$NOWHERE_CRT" && -f "$NOWHERE_TLS_KEY" ]] || die "Certificate or private-key file does not exist."
+      fi
+      case "$NOWHERE_OUT" in
+        direct) ;;
+        socks) validate_vector_socks "$NOWHERE_OUT_SOCKS" || die "Invalid Portal SOCKS5 upstream." ;;
+        egress)
+          [[ "$NOWHERE_UDP_CARRIER" != none ]] || die "Portal out=egress requires a QUIC/UDP listener."
+          [[ "$NOWHERE_DIAL" == auto && "$NOWHERE_DIAL4" == auto && "$NOWHERE_DIAL6" == auto && "$DIAL_EXPLICIT" -eq 0 && "$DIAL4_EXPLICIT" -eq 0 && "$DIAL6_EXPLICIT" -eq 0 ]] || die "Portal out=egress cannot use dial, dial4, or dial6, including explicit auto values."
+          ;;
+        *) die "Portal out must be direct, socks, or egress." ;;
+      esac
+      if [[ "$NOWHERE_CLIENT" == vector || "$NOWHERE_CLIENT" == both ]]; then
+        validate_vector_socks "$NOWHERE_VECTOR_SOCKS" || die "Invalid Vector SOCKS listener."
+        validate_sni "$NOWHERE_VECTOR_SNI" && validate_pin "$NOWHERE_VECTOR_PIN" || die "Invalid Vector SNI or certificate pin."
+        validate_nonnegative_int "$NOWHERE_VECTOR_RATE" && validate_nonnegative_int "$NOWHERE_VECTOR_ETAR" || die "Vector rate limits must be non-negative integers."
+      fi
+      ;;
+    egress)
+      [[ -n "$NOWHERE_EGRESS_PORTAL_HOST" ]] || die "Egress requires --egress-portal-host (or an interactive Portal host)."
+      case "$NOWHERE_EGRESS_PORTAL_HOST" in '*'|0.0.0.0|::|'[::]') die "Egress needs a concrete Portal host." ;; esac
+      [[ "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER" =~ ^(udp|udp4|udp6)$ ]] || die "Egress Portal carrier must be udp, udp4, or udp6."
+      validate_port "$NOWHERE_EGRESS_PORTAL_UDP_PORT" || die "Invalid Portal UDP port for Egress."
+      validate_sni "$NOWHERE_EGRESS_SNI" && validate_pin "$NOWHERE_EGRESS_PIN" || die "Invalid Egress SNI or certificate pin."
+      ;;
+    *) die "NW3 role must be portal or egress." ;;
+  esac
+}
+
+build_nw3_service_url() {
+  local host endpoint query="morph=${NOWHERE_MORPH}"
+  if [[ "$NOWHERE_ROLE" == portal ]]; then
+    host="$(format_host_for_url "$NOWHERE_LISTEN_HOST")"; [[ -n "$host" ]] || host='*'
+    endpoint="$(build_endpoint "$host" "$NOWHERE_TCP_CARRIER" "$NOWHERE_TCP_PORT" "$NOWHERE_UDP_CARRIER" "$NOWHERE_UDP_PORT")"
+    query="tls=${NOWHERE_TLS}&${query}"
+    [[ "$NOWHERE_RATE" == 0 ]] || query="${query}&rate=${NOWHERE_RATE}"
+    [[ "$NOWHERE_ETAR" == 0 ]] || query="${query}&etar=${NOWHERE_ETAR}"
+    if [[ "$NOWHERE_OUT" == socks ]]; then query="${query}&out=$(encode_socks_query_value "$NOWHERE_OUT_SOCKS")"; elif [[ "$NOWHERE_OUT" == egress ]]; then query="${query}&out=egress"; fi
+    if [[ "$NOWHERE_DIAL" != auto ]]; then
+      query="${query}&dial=$(urlencode "$NOWHERE_DIAL")"
+    else
+      [[ "$NOWHERE_DIAL4" == auto ]] || query="${query}&dial4=$(urlencode "$NOWHERE_DIAL4")"
+      [[ "$NOWHERE_DIAL6" == auto ]] || query="${query}&dial6=$(urlencode "$NOWHERE_DIAL6")"
+    fi
+    [[ "$NOWHERE_TLS" != 2 ]] || query="${query}&crt=$(urlencode "$NOWHERE_CRT")&key=$(urlencode "$NOWHERE_TLS_KEY")"
+    printf 'portal://%s@%s?%s' "$NOWHERE_KEY" "$endpoint" "$query"
+  else
+    host="$(format_host_for_url "$NOWHERE_EGRESS_PORTAL_HOST")"
+    endpoint="$(build_endpoint "$host" none 0 "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER" "$NOWHERE_EGRESS_PORTAL_UDP_PORT")"
+    [[ "$NOWHERE_EGRESS_SNI" == none ]] || query="${query}&sni=$(urlencode "$NOWHERE_EGRESS_SNI")"
+    [[ "$NOWHERE_EGRESS_PIN" == none ]] || query="${query}&pin=${NOWHERE_EGRESS_PIN}"
+    if [[ "$NOWHERE_DIAL" != auto ]]; then
+      query="${query}&dial=$(urlencode "$NOWHERE_DIAL")"
+    else
+      [[ "$NOWHERE_DIAL4" == auto ]] || query="${query}&dial4=$(urlencode "$NOWHERE_DIAL4")"
+      [[ "$NOWHERE_DIAL6" == auto ]] || query="${query}&dial6=$(urlencode "$NOWHERE_DIAL6")"
+    fi
+    [[ "$NOWHERE_RATE" == 0 ]] || query="${query}&rate=${NOWHERE_RATE}"
+    [[ "$NOWHERE_ETAR" == 0 ]] || query="${query}&etar=${NOWHERE_ETAR}"
+    printf 'egress://%s@%s?%s' "$NOWHERE_KEY" "$endpoint" "$query"
+  fi
+}
+
+configure_nw3_values() {
+  local generated_key="$1" detected_host="$2" role_default default_morph previous_role role_changed=0
+  [[ "${NOWHERE_NEXT:-none}" == none ]] || die "NW3 removes native next; use --out egress or another supported Portal output."
+  previous_role="${NOWHERE_ROLE_VALUE:-portal}"
+  role_default="${NOWHERE_ROLE:-${NOWHERE_ROLE_VALUE:-portal}}"
+  NOWHERE_ROLE="$role_default"
+  if [[ "$ROLE_EXPLICIT" -eq 0 && "$ASSUME_YES" -eq 0 ]]; then
+    NOWHERE_ROLE="$(prompt_value "Service role portal/egress" "服务角色 portal/egress" "$NOWHERE_ROLE")"
+  fi
+  [[ "$NOWHERE_ROLE" == portal || "$NOWHERE_ROLE" == egress ]] || die "NW3 role must be portal or egress."
+  [[ "$NOWHERE_ROLE" == "$previous_role" ]] || role_changed=1
+
+  if [[ -n "${NOWHERE_MORPH:-}" ]]; then
+    default_morph="$NOWHERE_MORPH"
+  elif is_nw3_version "${NOWHERE_VERSION_VALUE:-}"; then
+    default_morph="${NOWHERE_MORPH_VALUE:-1}"
+  else
+    default_morph=1
+  fi
+  NOWHERE_MORPH="$default_morph"
+  NOWHERE_KEY="${NOWHERE_KEY:-${NOWHERE_KEY_VALUE:-$generated_key}}"
+  if ! validate_nw3_key "$NOWHERE_KEY"; then
+    [[ "$KEY_EXPLICIT" -eq 0 && -n "${NOWHERE_KEY_VALUE:-}" ]] || die "NW3 shared keys must be exactly 32 lowercase hexadecimal characters."
+    migrate_shared_key_for_version "$NOWHERE_VERSION" || return 1
+  fi
+  NOWHERE_RATE="${NOWHERE_RATE:-${NOWHERE_RATE_VALUE:-0}}"
+  NOWHERE_ETAR="${NOWHERE_ETAR:-${NOWHERE_ETAR_VALUE:-0}}"
+  NOWHERE_DIAL="${NOWHERE_DIAL:-${NOWHERE_DIAL_VALUE:-auto}}"
+  NOWHERE_DIAL4="${NOWHERE_DIAL4:-${NOWHERE_DIAL4_VALUE:-auto}}"
+  NOWHERE_DIAL6="${NOWHERE_DIAL6:-${NOWHERE_DIAL6_VALUE:-auto}}"
+  if [[ "$DIAL_EXPLICIT" -eq 0 && ( "$DIAL4_EXPLICIT" -eq 1 || "$DIAL6_EXPLICIT" -eq 1 ) ]]; then NOWHERE_DIAL=auto; fi
+  NOWHERE_CLIENT="${NOWHERE_CLIENT:-${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}}"
+  NOWHERE_VECTOR_SOCKS="${NOWHERE_VECTOR_SOCKS:-${NOWHERE_VECTOR_SOCKS_VALUE:-$DEFAULT_VECTOR_SOCKS}}"
+  NOWHERE_VECTOR_SNI="${NOWHERE_VECTOR_SNI:-${NOWHERE_VECTOR_SNI_VALUE:-$DEFAULT_SNI}}"
+  NOWHERE_VECTOR_PIN="${NOWHERE_VECTOR_PIN:-${NOWHERE_VECTOR_PIN_VALUE:-$DEFAULT_PIN}}"
+  NOWHERE_VECTOR_RATE="${NOWHERE_VECTOR_RATE:-${NOWHERE_VECTOR_RATE_VALUE:-0}}"
+  NOWHERE_VECTOR_ETAR="${NOWHERE_VECTOR_ETAR:-${NOWHERE_VECTOR_ETAR_VALUE:-0}}"
+
+  if [[ "$NOWHERE_ROLE" == portal ]]; then
+    if [[ "$role_changed" -eq 1 ]]; then
+      [[ "$PUBLIC_HOST_EXPLICIT" -eq 1 ]] || NOWHERE_PUBLIC_HOST="$detected_host"
+      [[ "$LISTEN_HOST_EXPLICIT" -eq 1 ]] || NOWHERE_LISTEN_HOST=""
+      [[ "$TCP_CARRIER_EXPLICIT" -eq 1 ]] || NOWHERE_TCP_CARRIER="$DEFAULT_TCP_CARRIER"
+      [[ "$TCP_PORT_EXPLICIT" -eq 1 ]] || NOWHERE_TCP_PORT="$DEFAULT_PORT"
+      [[ "$UDP_CARRIER_EXPLICIT" -eq 1 ]] || NOWHERE_UDP_CARRIER="$DEFAULT_UDP_CARRIER"
+      [[ "$UDP_PORT_EXPLICIT" -eq 1 ]] || NOWHERE_UDP_PORT="$DEFAULT_PORT"
+    else
+      NOWHERE_PUBLIC_HOST="${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-$detected_host}}"
+      NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER:-${NOWHERE_TCP_CARRIER_VALUE:-$DEFAULT_TCP_CARRIER}}"
+      NOWHERE_TCP_PORT="${NOWHERE_TCP_PORT:-${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}}"
+      NOWHERE_UDP_CARRIER="${NOWHERE_UDP_CARRIER:-${NOWHERE_UDP_CARRIER_VALUE:-$DEFAULT_UDP_CARRIER}}"
+      NOWHERE_UDP_PORT="${NOWHERE_UDP_PORT:-${NOWHERE_UDP_PORT_VALUE:-$DEFAULT_PORT}}"
+    fi
+    [[ "$role_changed" -eq 1 ]] || NOWHERE_LISTEN_HOST="${NOWHERE_LISTEN_HOST:-${NOWHERE_LISTEN_HOST_VALUE:-}}"
+    NOWHERE_CRT="${NOWHERE_CRT:-${NOWHERE_CRT_VALUE:-}}"
+    NOWHERE_TLS_KEY="${NOWHERE_TLS_KEY:-${NOWHERE_TLS_KEY_VALUE:-}}"
+    NOWHERE_TLS="${NOWHERE_TLS:-${NOWHERE_TLS_VALUE:-$DEFAULT_TLS}}"
+    if [[ -n "${NOWHERE_OUT:-}" || "$OUT_EXPLICIT" -eq 1 ]]; then
+      NOWHERE_OUT="${NOWHERE_OUT:-${NOWHERE_OUT_VALUE:-direct}}"
+    elif ! is_nw3_version "${NOWHERE_VERSION_VALUE:-$NOWHERE_VERSION}" && [[ "${NOWHERE_NEXT_VALUE:-none}" != none ]]; then
+      NOWHERE_OUT=none
+      warn "NW3 removes native next; select a replacement Portal output."
+    elif ! is_nw3_version "${NOWHERE_VERSION_VALUE:-$NOWHERE_VERSION}" && [[ "${NOWHERE_SOCKS_VALUE:-none}" != none ]]; then
+      NOWHERE_OUT=socks
+    else
+      NOWHERE_OUT="${NOWHERE_OUT_VALUE:-direct}"
+    fi
+    NOWHERE_OUT_SOCKS="${NOWHERE_OUT_SOCKS:-${NOWHERE_OUT_SOCKS_VALUE:-${NOWHERE_SOCKS_VALUE:-none}}}"
+    if [[ "${NOWHERE_SOCKS:-none}" != none && "$OUT_EXPLICIT" -eq 0 ]]; then NOWHERE_OUT=socks; NOWHERE_OUT_SOCKS="$NOWHERE_SOCKS"; fi
+  else
+    NOWHERE_EGRESS_PORTAL_HOST="${NOWHERE_EGRESS_PORTAL_HOST:-${NOWHERE_EGRESS_PORTAL_HOST_VALUE:-}}"
+    NOWHERE_EGRESS_PORTAL_UDP_CARRIER="${NOWHERE_EGRESS_PORTAL_UDP_CARRIER:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}"
+    NOWHERE_EGRESS_PORTAL_UDP_PORT="${NOWHERE_EGRESS_PORTAL_UDP_PORT:-${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}}"
+    NOWHERE_EGRESS_SNI="${NOWHERE_EGRESS_SNI:-${NOWHERE_EGRESS_SNI_VALUE:-none}}"
+    NOWHERE_EGRESS_PIN="${NOWHERE_EGRESS_PIN:-${NOWHERE_EGRESS_PIN_VALUE:-$DEFAULT_PIN}}"
+  fi
+  NOWHERE_PUBLIC_HOST="${NOWHERE_PUBLIC_HOST:-${NOWHERE_EGRESS_PORTAL_HOST:-$detected_host}}"
+  NOWHERE_ANYWHERE_SNI="${NOWHERE_ANYWHERE_SNI:-none}"
+  NOWHERE_LISTEN_HOST="${NOWHERE_LISTEN_HOST:-}"
+  NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER:-none}"; NOWHERE_TCP_PORT="${NOWHERE_TCP_PORT:-$DEFAULT_PORT}"
+  NOWHERE_UDP_CARRIER="${NOWHERE_UDP_CARRIER:-none}"; NOWHERE_UDP_PORT="${NOWHERE_UDP_PORT:-$DEFAULT_PORT}"
+  NOWHERE_TLS="${NOWHERE_TLS:-$DEFAULT_TLS}"; NOWHERE_CRT="${NOWHERE_CRT:-}"; NOWHERE_TLS_KEY="${NOWHERE_TLS_KEY:-}"
+  NOWHERE_MORPH_TCP_PRELUDE="${NOWHERE_MORPH_TCP_PRELUDE:-${NOWHERE_MORPH_TCP_PRELUDE_VALUE:-${NOW_MORPH_TCP_PRELUDE:-$DEFAULT_MORPH_TCP_PRELUDE}}}"
+  NOWHERE_SOCKS="${NOWHERE_SOCKS:-${NOWHERE_OUT_SOCKS:-none}}"
+  NOWHERE_NEXT="${NOWHERE_NEXT:-none}"; NOWHERE_NEXT_UP="${NOWHERE_NEXT_UP:-tcp}"; NOWHERE_NEXT_DOWN="${NOWHERE_NEXT_DOWN:-tcp}"
+  NOWHERE_NEXT_MUX="${NOWHERE_NEXT_MUX:-$DEFAULT_MUX}"; NOWHERE_NEXT_SNI="${NOWHERE_NEXT_SNI:-$DEFAULT_SNI}"; NOWHERE_NEXT_PIN="${NOWHERE_NEXT_PIN:-$DEFAULT_PIN}"
+  NOWHERE_VECTOR_UP="${NOWHERE_VECTOR_UP:-tcp}"; NOWHERE_VECTOR_DOWN="${NOWHERE_VECTOR_DOWN:-tcp}"; NOWHERE_VECTOR_MUX="${NOWHERE_VECTOR_MUX:-$DEFAULT_MUX}"
+  NOWHERE_VECTOR_LOG="${NOWHERE_VECTOR_LOG:-$DEFAULT_LOG}"; NOWHERE_LOG="${NOWHERE_LOG:-$DEFAULT_LOG}"
+  NOWHERE_TRANSPORT_MEMORY_PROFILE="${NOWHERE_TRANSPORT_MEMORY_PROFILE:-${NOWHERE_TRANSPORT_MEMORY_PROFILE_VALUE:-${NOW_TRANSPORT_MEMORY_PROFILE:-$DEFAULT_TRANSPORT_MEMORY_PROFILE}}}"
+  NOWHERE_MIX_FALLBACK_TIMEOUT="${NOWHERE_MIX_FALLBACK_TIMEOUT:-$DEFAULT_MIX_FALLBACK_TIMEOUT}"
+  NOWHERE_TELEMETRY_INTERVAL="${NOWHERE_TELEMETRY_INTERVAL:-$DEFAULT_TELEMETRY_INTERVAL}"
+
+  if [[ "$ASSUME_YES" -eq 0 ]]; then
+    is_chinese && info "NW3 配置向导。直接回车保留默认值。" || info "NW3 configuration wizard. Press Enter to keep defaults."
+    if [[ "$NOWHERE_ROLE" == portal ]]; then
+      NOWHERE_CLIENT="$(prompt_value "Client output anywhere/vector/both" "客户端输出 anywhere/vector/both" "$NOWHERE_CLIENT")"
+      NOWHERE_PUBLIC_HOST="$(prompt_value "Public domain/IP" "公网域名或 IP" "$NOWHERE_PUBLIC_HOST")"
+      NOWHERE_LISTEN_HOST="$(prompt_value "Listen host, empty means wildcard" "监听地址，留空监听全部地址" "$NOWHERE_LISTEN_HOST")"
+      NOWHERE_TCP_CARRIER="$(prompt_value "TCP carrier tcp/tcp4/tcp6/none" "TCP 载体 tcp/tcp4/tcp6/none" "$NOWHERE_TCP_CARRIER")"
+      [[ "$NOWHERE_TCP_CARRIER" == none ]] || NOWHERE_TCP_PORT="$(prompt_value "TCP port" "TCP 端口" "$NOWHERE_TCP_PORT")"
+      NOWHERE_UDP_CARRIER="$(prompt_value "UDP carrier udp/udp4/udp6/none" "UDP 载体 udp/udp4/udp6/none" "$NOWHERE_UDP_CARRIER")"
+      [[ "$NOWHERE_UDP_CARRIER" == none ]] || NOWHERE_UDP_PORT="$(prompt_value "UDP port" "UDP 端口" "$NOWHERE_UDP_PORT")"
+      NOWHERE_KEY="$(prompt_value "Shared Key (32 lowercase hex)" "共享密钥（32 位小写十六进制）" "$NOWHERE_KEY")"
+      NOWHERE_TLS="$(prompt_value "TLS 1=self-signed, 2=PEM" "TLS 1=自签证书，2=PEM 证书" "$NOWHERE_TLS")"
+      if [[ "$NOWHERE_TLS" == 2 ]]; then NOWHERE_CRT="$(prompt_value "Certificate chain absolute path" "证书链绝对路径" "$NOWHERE_CRT")"; NOWHERE_TLS_KEY="$(prompt_value "Private key absolute path" "私钥绝对路径" "$NOWHERE_TLS_KEY")"; fi
+      NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
+      [[ "$NOWHERE_MORPH" != 1 ]] || NOWHERE_MORPH_TCP_PRELUDE="$(prompt_value "TCP Morph prelude low7/full8" "TCP Morph 前导 low7/full8" "$NOWHERE_MORPH_TCP_PRELUDE")"
+      NOWHERE_RATE="$(prompt_value "Rate Mbps, 0=unlimited" "限速 Mbps，0=不限速" "$NOWHERE_RATE")"
+      NOWHERE_ETAR="$(prompt_value "Etar Mbps, 0=unlimited" "Etar Mbps，0=不限速" "$NOWHERE_ETAR")"
+      NOWHERE_OUT="$(prompt_value "Portal out direct/socks/egress" "Portal 出口 direct/socks/egress" "$NOWHERE_OUT")"
+      if [[ "$NOWHERE_OUT" == socks ]]; then NOWHERE_OUT_SOCKS="$(prompt_value "Outbound SOCKS5" "出站 SOCKS5" "$NOWHERE_OUT_SOCKS")"; fi
+      if [[ "$NOWHERE_OUT" == egress ]]; then
+        [[ "$DIAL_EXPLICIT" -eq 1 || "$DIAL4_EXPLICIT" -eq 1 || "$DIAL6_EXPLICIT" -eq 1 ]] || { NOWHERE_DIAL=auto; NOWHERE_DIAL4=auto; NOWHERE_DIAL6=auto; }
+      else
+        NOWHERE_DIAL="$(prompt_value "Outbound source IP (dial), auto=system default" "出站源 IP（dial），auto=系统默认" "$NOWHERE_DIAL")"
+        [[ "$NOWHERE_DIAL" == auto ]] || DIAL_EXPLICIT=1
+        if [[ "$NOWHERE_DIAL" != auto ]]; then NOWHERE_DIAL4=auto; NOWHERE_DIAL6=auto; fi
+        if [[ "$NOWHERE_DIAL" == auto && "$DIAL_EXPLICIT" -eq 0 ]]; then
+          NOWHERE_DIAL4="$(prompt_value "IPv4 outbound source (dial4)" "IPv4 出站源地址（dial4）" "$NOWHERE_DIAL4")"
+          NOWHERE_DIAL6="$(prompt_value "IPv6 outbound source (dial6)" "IPv6 出站源地址（dial6）" "$NOWHERE_DIAL6")"
+        fi
+      fi
+      if [[ "$NOWHERE_CLIENT" == vector || "$NOWHERE_CLIENT" == both ]]; then
+        NOWHERE_VECTOR_SOCKS="$(prompt_value "Vector local SOCKS5 listener" "Vector 本地 SOCKS5 监听地址" "$NOWHERE_VECTOR_SOCKS")"
+        NOWHERE_VECTOR_SNI="$(prompt_value "Vector SNI/none" "Vector SNI/none" "$NOWHERE_VECTOR_SNI")"
+        NOWHERE_VECTOR_PIN="$(prompt_value "Vector certificate pin/none" "Vector 证书 Pin/none" "$NOWHERE_VECTOR_PIN")"
+        NOWHERE_VECTOR_RATE="$(prompt_value "Vector rate Mbps, 0=unlimited" "Vector 限速 Mbps，0=不限速" "$NOWHERE_VECTOR_RATE")"
+        NOWHERE_VECTOR_ETAR="$(prompt_value "Vector etar Mbps, 0=unlimited" "Vector Etar Mbps，0=不限速" "$NOWHERE_VECTOR_ETAR")"
+      fi
+    else
+      NOWHERE_EGRESS_PORTAL_HOST="$(prompt_value "Portal public host" "Portal 公网域名或 IP" "$NOWHERE_EGRESS_PORTAL_HOST")"
+      NOWHERE_EGRESS_PORTAL_UDP_CARRIER="$(prompt_value "Portal UDP carrier udp/udp4/udp6" "Portal UDP 载体 udp/udp4/udp6" "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER")"
+      NOWHERE_EGRESS_PORTAL_UDP_PORT="$(prompt_value "Portal UDP port" "Portal UDP 端口" "$NOWHERE_EGRESS_PORTAL_UDP_PORT")"
+      NOWHERE_KEY="$(prompt_value "Shared Key (same as Portal, 32 lowercase hex)" "共享密钥（与 Portal 相同，32 位小写十六进制）" "$NOWHERE_KEY")"
+      NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
+      NOWHERE_EGRESS_SNI="$(prompt_value "Portal SNI/none" "Portal SNI/none" "$NOWHERE_EGRESS_SNI")"
+      NOWHERE_EGRESS_PIN="$(prompt_value "Portal certificate pin/none" "Portal 证书 Pin/none" "$NOWHERE_EGRESS_PIN")"
+      NOWHERE_DIAL="$(prompt_value "Target source IP (dial), auto=system default" "目标出站源 IP（dial），auto=系统默认" "$NOWHERE_DIAL")"
+      [[ "$NOWHERE_DIAL" == auto ]] || DIAL_EXPLICIT=1
+      if [[ "$NOWHERE_DIAL" != auto ]]; then NOWHERE_DIAL4=auto; NOWHERE_DIAL6=auto; fi
+      if [[ "$NOWHERE_DIAL" == auto && "$DIAL_EXPLICIT" -eq 0 ]]; then
+        NOWHERE_DIAL4="$(prompt_value "IPv4 target source (dial4)" "IPv4 目标源地址（dial4）" "$NOWHERE_DIAL4")"
+        NOWHERE_DIAL6="$(prompt_value "IPv6 target source (dial6)" "IPv6 目标源地址（dial6）" "$NOWHERE_DIAL6")"
+      fi
+      NOWHERE_RATE="$(prompt_value "Rate Mbps, 0=unlimited" "限速 Mbps，0=不限速" "$NOWHERE_RATE")"
+      NOWHERE_ETAR="$(prompt_value "Etar Mbps, 0=unlimited" "Etar Mbps，0=不限速" "$NOWHERE_ETAR")"
+    fi
+    NOWHERE_TRANSPORT_MEMORY_PROFILE="$(prompt_value "Transport memory memory/balanced/throughput" "传输内存 memory/balanced/throughput" "$NOWHERE_TRANSPORT_MEMORY_PROFILE")"
+  fi
+
+  validate_nw3_config
+  NOWHERE_SERVICE_URL="$(build_nw3_service_url)"
+  NOWHERE_PORTAL="$NOWHERE_SERVICE_URL"
 }
 
 save_config() {
   install -d -m 700 "$CONFIG_DIR"
   cat >"$CONFIG_FILE" <<EOF
 NOWHERE_PORTAL=$(env_quote "$NOWHERE_PORTAL")
+NOWHERE_SERVICE_URL=$(env_quote "$NOWHERE_SERVICE_URL")
 NOWHERE_LANG_VALUE=$(env_quote "$NOWHERE_LANG")
 NOWHERE_VERSION_VALUE=$(env_quote "$NOWHERE_VERSION")
+NOWHERE_ROLE_VALUE=$(env_quote "$NOWHERE_ROLE")
 NOWHERE_CLIENT_VALUE=$(env_quote "$NOWHERE_CLIENT")
 NOWHERE_PUBLIC_HOST_VALUE=$(env_quote "$NOWHERE_PUBLIC_HOST")
 NOWHERE_ANYWHERE_SNI_VALUE=$(env_quote "$NOWHERE_ANYWHERE_SNI")
@@ -732,6 +1060,13 @@ NOWHERE_DIAL_VALUE=$(env_quote "$NOWHERE_DIAL")
 NOWHERE_DIAL4_VALUE=$(env_quote "${NOWHERE_DIAL4:-auto}")
 NOWHERE_DIAL6_VALUE=$(env_quote "${NOWHERE_DIAL6:-auto}")
 NOWHERE_SOCKS_VALUE=$(env_quote "$NOWHERE_SOCKS")
+NOWHERE_OUT_VALUE=$(env_quote "${NOWHERE_OUT:-direct}")
+NOWHERE_OUT_SOCKS_VALUE=$(env_quote "${NOWHERE_OUT_SOCKS:-none}")
+NOWHERE_EGRESS_PORTAL_HOST_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_HOST:-}")
+NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_UDP_CARRIER:-udp}")
+NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_UDP_PORT:-$DEFAULT_PORT}")
+NOWHERE_EGRESS_SNI_VALUE=$(env_quote "${NOWHERE_EGRESS_SNI:-none}")
+NOWHERE_EGRESS_PIN_VALUE=$(env_quote "${NOWHERE_EGRESS_PIN:-none}")
 NOWHERE_NEXT_VALUE=$(env_quote "$NOWHERE_NEXT")
 NOWHERE_NEXT_UP_VALUE=$(env_quote "$NOWHERE_NEXT_UP")
 NOWHERE_NEXT_DOWN_VALUE=$(env_quote "$NOWHERE_NEXT_DOWN")
@@ -775,7 +1110,7 @@ install_binary() {
 write_service() {
   cat >"$SERVICE_FILE" <<EOF
 [Unit]
-Description=Nowhere Portal
+Description=Nowhere ${NOWHERE_ROLE:-portal}
 Documentation=https://github.com/${REPO}
 After=network-online.target
 Wants=network-online.target
@@ -783,7 +1118,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=${CONFIG_FILE}
-ExecStart=${BIN_PATH} \${NOWHERE_PORTAL}
+ExecStart=${BIN_PATH} \${NOWHERE_SERVICE_URL}
 Restart=on-failure
 RestartSec=3
 LimitNOFILE=1048576
@@ -801,11 +1136,11 @@ EOF
 }
 service_cmd() { require_root; require_systemd; systemctl "$1" "$SERVICE_NAME"; }
 run_nowhere_status() {
-  require_nowhere_version_at_least v2.1.2
+  require_supported_nowhere
   "$BIN_PATH" status
 }
 run_probe() {
-  require_nowhere_version_at_least v2.1.2
+  require_supported_nowhere
   local target="${1:-}" vector_url
   if [[ -z "$target" ]]; then
     [[ -t 0 ]] || die "Usage: sudo bash $SCRIPT_PATH probe <host:port>"
@@ -831,9 +1166,39 @@ print_qr_code() { [[ -n "$1" ]] || return; install_qrencode || return; echo; ech
 
 print_links() {
   require_root; load_config; [[ -n "${NOWHERE_KEY_VALUE:-}" ]] || die "No configuration found."
-  local host endpoint anywhere_endpoint key name base tcp_link udp_link vector_link qr_link="" query
+  local host endpoint anywhere_endpoint key name base tcp_link="" udp_link="" vector_link qr_link="" query vector_carrier vector_port
   host="${NOWHERE_PUBLIC_HOST_VALUE:-}"; [[ -n "$host" ]] || die "Public host is empty. Reconfigure the service."
   host="$(format_host_for_url "$host")"; endpoint="$(build_endpoint "$host" "$NOWHERE_TCP_CARRIER_VALUE" "$NOWHERE_TCP_PORT_VALUE" "$NOWHERE_UDP_CARRIER_VALUE" "$NOWHERE_UDP_PORT_VALUE")"; anywhere_endpoint="$(build_endpoint "$host" "$(carrier_without_family "$NOWHERE_TCP_CARRIER_VALUE")" "$NOWHERE_TCP_PORT_VALUE" "$(carrier_without_family "$NOWHERE_UDP_CARRIER_VALUE")" "$NOWHERE_UDP_PORT_VALUE")"; key="$(urlencode "$NOWHERE_KEY_VALUE")"; name="$(urlencode "Nowhere VPS")"
+  if is_nw3_version "${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; then
+    if [[ "${NOWHERE_ROLE_VALUE:-portal}" == egress ]]; then
+      echo; echo "Role: NW3 Egress"; echo "Release: ${NOWHERE_VERSION_VALUE}"; echo; echo "Egress URL:"; echo "  ${NOWHERE_SERVICE_URL}"; echo; echo "Client command:"; echo "  nowhere '${NOWHERE_SERVICE_URL}'"
+      echo; echo "Egress makes an outbound QUIC connection; no inbound firewall port is required on this VPS."
+      return
+    fi
+    echo; echo "Role: NW3 Portal"; echo "Client output: $(client_label "$NOWHERE_CLIENT_VALUE")"; echo "Release: ${NOWHERE_VERSION_VALUE}"; echo; echo "Portal URL:"; echo "  ${NOWHERE_SERVICE_URL}"; echo
+    if [[ "$NOWHERE_CLIENT_VALUE" == vector || "$NOWHERE_CLIENT_VALUE" == both ]]; then
+      if [[ "$NOWHERE_TCP_CARRIER_VALUE" != none ]]; then vector_carrier="$NOWHERE_TCP_CARRIER_VALUE"; vector_port="$NOWHERE_TCP_PORT_VALUE"; else vector_carrier="$NOWHERE_UDP_CARRIER_VALUE"; vector_port="$NOWHERE_UDP_PORT_VALUE"; fi
+      endpoint="$(build_endpoint "$host" "$vector_carrier" "$vector_port" none "$DEFAULT_PORT")"
+      if query="$(build_vector_query)"; then
+        vector_link="vector://${key}@${endpoint}?${query}"; echo "Native Vector URL:"; echo "  ${vector_link}"; echo; echo "Client command:"; echo "  nowhere '${vector_link}'"; [[ "$NOWHERE_CLIENT_VALUE" == both ]] && echo
+      else
+        is_chinese && warn "Native Vector 链接未生成；请先确保 Portal 已启动并能读取证书指纹。" || warn "Native Vector URL was not generated; ensure Portal is running and its certificate fingerprint is available."
+      fi
+    fi
+    if [[ "$NOWHERE_CLIENT_VALUE" == anywhere || "$NOWHERE_CLIENT_VALUE" == both ]]; then
+      if [[ "$NOWHERE_TCP_CARRIER_VALUE" != none ]]; then
+        tcp_link="nowhere://${key}@${host}:${NOWHERE_TCP_PORT_VALUE}?net=tcp&morph=${NOWHERE_MORPH_VALUE}#${name}"
+        qr_link="$tcp_link"; echo "Anywhere import link (TLS/TCP):"; echo "  ${tcp_link}"
+      fi
+      if [[ "$NOWHERE_UDP_CARRIER_VALUE" != none ]]; then
+        udp_link="nowhere://${key}@${host}:${NOWHERE_UDP_PORT_VALUE}?net=udp&morph=${NOWHERE_MORPH_VALUE}#${name}"
+        [[ -n "$tcp_link" ]] && echo; [[ -n "$qr_link" ]] || qr_link="$udp_link"; echo "Anywhere import link (QUIC/UDP):"; echo "  ${udp_link}"
+      fi
+      print_qr_code "$qr_link"
+    fi
+    echo; echo "Firewall reminder:"; [[ "$NOWHERE_TCP_CARRIER_VALUE" == none ]] || echo "  Open TCP ${NOWHERE_TCP_PORT_VALUE}"; [[ "$NOWHERE_UDP_CARRIER_VALUE" == none ]] || echo "  Open UDP ${NOWHERE_UDP_PORT_VALUE}"
+    return
+  fi
   echo; echo "Client output: $(client_label "$NOWHERE_CLIENT_VALUE")"; echo "Release: ${NOWHERE_VERSION_VALUE}"; echo; echo "Portal URL:"; echo "  ${NOWHERE_PORTAL}"; echo
   if [[ "$NOWHERE_CLIENT_VALUE" == vector || "$NOWHERE_CLIENT_VALUE" == both ]]; then
     if query="$(build_vector_query)"; then
@@ -855,9 +1220,9 @@ print_links() {
 }
 
 local_tls_probe_host() {
-  local host="$(strip_brackets "${NOWHERE_LISTEN_HOST_VALUE:-}")" carrier="${NOWHERE_TCP_CARRIER_VALUE:-tcp}"
+  local host="$(strip_brackets "${NOWHERE_LISTEN_HOST_VALUE:-}")" carrier="${1:-${NOWHERE_TCP_CARRIER_VALUE:-tcp}}"
   if [[ -z "$host" || "$host" == '*' || "$host" == 0.0.0.0 || "$host" == :: ]]; then
-    [[ "$carrier" == tcp6 ]] && printf '[::1]' || printf '127.0.0.1'
+    [[ "$carrier" == tcp6 || "$carrier" == udp6 ]] && printf '[::1]' || printf '127.0.0.1'
   elif [[ "$host" == *:* ]]; then
     printf '[%s]' "$host"
   else
@@ -866,35 +1231,43 @@ local_tls_probe_host() {
 }
 print_tls_fingerprint_from_logs() {
   command -v journalctl >/dev/null 2>&1 || return 1
-  journalctl -u "$SERVICE_NAME" -n 300 --no-pager 2>/dev/null |
-    sed -nE 's/.*CERT_SHA256\|([A-Fa-f0-9]{64}).*/\1/p; s/.*TLS certificate SHA-256 fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p' |
+  local invocation journal_args=(-u "$SERVICE_NAME" -n 300 --no-pager)
+  invocation="$(systemctl show "$SERVICE_NAME" --property=InvocationID --value 2>/dev/null || true)"
+  [[ ! "$invocation" =~ ^[0-9a-fA-F]{32}$ ]] || journal_args+=("_SYSTEMD_INVOCATION_ID=$invocation")
+  journalctl "${journal_args[@]}" 2>/dev/null |
+    sed -nE 's/.*CERT_SHA256\|([A-Fa-f0-9]{64}).*/\1/p; s/.*TLS certificate SHA-256 fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p; s/.*tls certificate fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p' |
     tail -n 1
 }
 current_local_tls_fingerprint() {
-  local fingerprint output host port morph version tcp_carrier key endpoint url
+  local fingerprint output host port morph version tcp_carrier key endpoint url alpn=nw2
   command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE_NAME" || return 1
-  fingerprint="$(print_tls_fingerprint_from_logs 2>/dev/null || true)"
-  fingerprint="${fingerprint//:/}"
-  fingerprint="$(printf '%s' "$fingerprint" | tr 'A-F' 'a-f')"
-  [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] && { printf '%s' "$fingerprint"; return; }
   morph="${NOWHERE_MORPH_VALUE:-${NOWHERE_MORPH:-$DEFAULT_MORPH}}"
-  version="${NOWHERE_VERSION_VALUE:-${NOWHERE_VERSION:-v2.0.0}}"
+  version="${NOWHERE_VERSION_VALUE:-${NOWHERE_VERSION:-$NW2_LTS_VERSION}}"
+  is_nw3_version "$version" && alpn=nw3
   tcp_carrier="${NOWHERE_TCP_CARRIER_VALUE:-${NOWHERE_TCP_CARRIER:-tcp}}"
   port="${NOWHERE_TCP_PORT_VALUE:-${NOWHERE_TCP_PORT:-$DEFAULT_PORT}}"
-  if [[ -x "$BIN_PATH" && "$tcp_carrier" != none && -n "${NOWHERE_KEY_VALUE:-${NOWHERE_KEY:-}}" ]] && version_at_least "$version" v2.2.0; then
-    host="$(local_tls_probe_host)"
-    endpoint="$(build_endpoint "$host" "$tcp_carrier" "$port" none "$port")"
+  if [[ -x "$BIN_PATH" && "$tcp_carrier" != none && -n "${NOWHERE_KEY_VALUE:-${NOWHERE_KEY:-}}" ]]; then
+    host="$(local_tls_probe_host "$tcp_carrier")"
     key="$(urlencode "${NOWHERE_KEY_VALUE:-${NOWHERE_KEY:-}}")"
-    url="nowhere://${key}@${endpoint}?morph=${morph}"
+    if is_nw3_version "$version"; then
+      url="nowhere://${key}@${host}:${port}?net=tcp&morph=${morph}"
+    else
+      endpoint="$(build_endpoint "$host" "$tcp_carrier" "$port" none "$port")"
+      url="nowhere://${key}@${endpoint}?morph=${morph}"
+    fi
     output="$("$BIN_PATH" fingerprint "$url" 2>/dev/null || true)"
     fingerprint="${output//:/}"
     fingerprint="$(printf '%s' "$fingerprint" | tr -d '[:space:]' | tr 'A-F' 'a-f')"
     [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] && { printf '%s' "$fingerprint"; return; }
   fi
+  fingerprint="$(print_tls_fingerprint_from_logs 2>/dev/null || true)"
+  fingerprint="${fingerprint//:/}"
+  fingerprint="$(printf '%s' "$fingerprint" | tr 'A-F' 'a-f')"
+  [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] && { printf '%s' "$fingerprint"; return; }
   [[ "$morph" == 0 && "${NOWHERE_TCP_CARRIER:-${NOWHERE_TCP_CARRIER_VALUE:-tcp}}" != none ]] || return 1
   command -v openssl >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1 || return 1
   host="$(local_tls_probe_host)"
-  output="$(timeout 8 openssl s_client -connect "${host}:${port}" -servername "${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-localhost}}" -alpn nw2 -showcerts </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"
+  output="$(timeout 8 openssl s_client -connect "${host}:${port}" -servername "${NOWHERE_PUBLIC_HOST:-${NOWHERE_PUBLIC_HOST_VALUE:-localhost}}" -alpn "$alpn" -showcerts </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"
   fingerprint="${output#*=}"
   fingerprint="${fingerprint//:/}"
   fingerprint="$(printf '%s' "$fingerprint" | tr 'A-F' 'a-f')"
@@ -903,21 +1276,21 @@ current_local_tls_fingerprint() {
 }
 print_tls_fingerprint() {
   require_root; load_config
-  local fingerprint output host
-  fingerprint="$(print_tls_fingerprint_from_logs || true)"
-  if [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" != none ]] && command -v openssl >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
-    host="$(local_tls_probe_host)"
-    for _ in 1 2 3 4 5; do output="$(timeout 8 openssl s_client -connect "${host}:${NOWHERE_TCP_PORT_VALUE}" -servername "${NOWHERE_PUBLIC_HOST_VALUE:-localhost}" -alpn nw2 -showcerts </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null || true)"; fingerprint="${output#*=}"; [[ -n "$fingerprint" && "$fingerprint" != "$output" ]] && { echo "Certificate SHA-256:"; echo "  ${fingerprint}"; return; }; sleep 1; done
+  local fingerprint
+  if [[ "${NOWHERE_ROLE_VALUE:-portal}" == egress ]]; then
+    is_chinese && info "Egress 不提供本地服务端证书。" || info "Egress does not provide a local server certificate."
+    return 0
   fi
-  [[ -n "$fingerprint" ]] && { echo "Certificate SHA-256 (from logs):"; echo "  ${fingerprint}"; return; }
+  fingerprint="$(current_local_tls_fingerprint || true)"
+  [[ -n "$fingerprint" ]] && { echo "Certificate SHA-256:"; echo "  ${fingerprint}"; return; }
   warn "Fingerprint unavailable. Check: journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
 }
 run_generate_key() {
-  require_nowhere_version_at_least v2.2.0
+  require_supported_nowhere
   "$BIN_PATH" generate-key
 }
 run_remote_fingerprint() {
-  require_nowhere_version_at_least v2.2.0
+  require_supported_nowhere
   [[ "$FINGERPRINT_URL" == nowhere://* ]] || die "Usage: sudo bash $SCRIPT_PATH fingerprint nowhere://KEY@HOST:PORT[?QUERY]"
   "$BIN_PATH" fingerprint "$FINGERPRINT_URL"
 }
@@ -927,27 +1300,46 @@ prompt_remote_fingerprint() {
   run_remote_fingerprint
 }
 
-fetch_recent_releases() { curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPO}/releases?per_page=10" | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p'; }
+fetch_recent_releases() { curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPO}/releases?per_page=100" | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p'; }
 choose_release_version() {
-  local releases=() item index choice
-  while IFS= read -r item; do validate_release_version "$item" && ! is_excluded_release "$item" && releases+=("$item"); done < <(fetch_recent_releases)
+  local preferred="${1:-}" releases=() item index choice default_index=1 nw3_count=0
+  while IFS= read -r item; do
+    if validate_release_version "$item" && is_nw3_version "$item" && (( nw3_count < 10 )); then
+      releases+=("$item"); nw3_count=$((nw3_count + 1))
+    fi
+  done < <(fetch_recent_releases)
+  releases+=("$NW2_LTS_VERSION")
   [[ ${#releases[@]} -gt 0 ]] || die "No supported release found on GitHub."
+  if [[ -n "$preferred" ]]; then
+    for index in "${!releases[@]}"; do [[ "${releases[$index]}" != "$preferred" ]] || default_index="$((index + 1))"; done
+  fi
   echo
-  is_chinese && echo "最近的受支持 Nowhere Release：" || echo "Recent supported Nowhere releases:"
+  is_chinese && echo "可用的 Nowhere Release（NW2 LTS / NW3）：" || echo "Available Nowhere releases (NW2 LTS / NW3):"
   for index in "${!releases[@]}"; do printf ' %2d) %s\n' "$((index + 1))" "${releases[$index]}"; done
   is_chinese && echo "  0) 取消" || echo "  0) Cancel"
   while true; do
-    if is_chinese; then read -r -p "请选择版本 [1]: " choice; else read -r -p "Choose a version [1]: " choice; fi
-    choice="${choice:-1}"
+    if is_chinese; then read -r -p "请选择版本 [${default_index}]: " choice; else read -r -p "Choose a version [${default_index}]: " choice; fi
+    choice="${choice:-$default_index}"
     [[ "$choice" == 0 ]] && return 1
     [[ "$choice" =~ ^[0-9]+$ ]] && (( 10#$choice >= 1 && 10#$choice <= ${#releases[@]} )) && { SELECTED_VERSION="${releases[$((10#$choice - 1))]}"; return; }
     is_chinese && warn "请输入 0..${#releases[@]}。" || warn "Enter 0..${#releases[@]}."
   done
 }
 
-install_all() { require_root; require_systemd; configure_values || return 1; install_binary "$NOWHERE_VERSION"; save_config; write_service; systemctl enable --now "$SERVICE_NAME"; info "Nowhere service enabled and started."; print_links; print_tls_fingerprint || true; }
-install_default() { NOWHERE_CLIENT="${NOWHERE_CLIENT:-$DEFAULT_CLIENT}"; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
-install_vector() { NOWHERE_CLIENT=vector; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
+install_all() {
+  require_root; require_systemd; load_config
+  if [[ -x "$BIN_PATH" && -n "${NOWHERE_VERSION_VALUE:-}" ]]; then
+    require_supported_installed_version "$NOWHERE_VERSION_VALUE"
+    confirm_protocol_upgrade "$NOWHERE_VERSION_VALUE" "${NOWHERE_VERSION:-$NOWHERE_VERSION_VALUE}" || return 1
+  fi
+  configure_values || return 1
+  if [[ "$NOWHERE_ROLE" == egress ]] && ! is_nw3_version "$NOWHERE_VERSION"; then die "Egress is available only in NW3."; fi
+  install_binary "$NOWHERE_VERSION"; save_config; write_service; systemctl enable "$SERVICE_NAME"; systemctl restart "$SERVICE_NAME"
+  info "Nowhere service enabled and started."; print_links; print_tls_fingerprint || true
+}
+install_default() { NOWHERE_CLIENT="${NOWHERE_CLIENT:-$DEFAULT_CLIENT}"; [[ "$ROLE_EXPLICIT" -eq 1 ]] || { NOWHERE_ROLE=portal; ROLE_EXPLICIT=1; }; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
+install_vector() { NOWHERE_CLIENT=vector; [[ "$ROLE_EXPLICIT" -eq 1 ]] || { NOWHERE_ROLE=portal; ROLE_EXPLICIT=1; }; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
+install_egress() { [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; NOWHERE_ROLE=egress; ROLE_EXPLICIT=1; install_all; }
 quick_install() { ASSUME_YES=1 install_default; }
 configure_all() { require_root; require_systemd; load_config; NOWHERE_VERSION="${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; configure_values || return 1; save_config; write_service; systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"; print_links; print_tls_fingerprint || true; }
 update_saved_version() { sed -i.bak "s/^NOWHERE_VERSION_VALUE=.*/NOWHERE_VERSION_VALUE=$(env_quote "$1")/" "$CONFIG_FILE"; rm -f "${CONFIG_FILE}.bak"; }
@@ -964,25 +1356,51 @@ change_language() { NOWHERE_LANG=""; NOWHERE_LANG_VALUE=""; resolve_language; up
 update_all() {
   require_root; require_systemd; load_config
   [[ -n "${NOWHERE_VERSION_VALUE:-}" ]] || die "No installation config found."
-  local selected
-  if [[ "$VERSION_EXPLICIT" -eq 1 ]]; then selected="$NOWHERE_VERSION"; else choose_release_version || return; selected="$SELECTED_VERSION"; fi
+  local current selected preferred current_nw3 selected_nw3
+  current="$NOWHERE_VERSION_VALUE"
+  require_supported_installed_version "$current"
+  if [[ "$VERSION_EXPLICIT" -eq 1 ]]; then
+    selected="$NOWHERE_VERSION"
+  else
+    preferred="$NW2_LTS_VERSION"; is_nw3_version "$current" && preferred=""
+    choose_release_version "$preferred" || return
+    selected="$SELECTED_VERSION"
+  fi
   require_deployable_version "$selected"
-  confirm_morph_upgrade "$NOWHERE_VERSION_VALUE" "$selected" || return
+  confirm_protocol_upgrade "$current" "$selected" || return
+  current_nw3=0; selected_nw3=0
+  is_nw3_version "$current" && current_nw3=1
+  is_nw3_version "$selected" && selected_nw3=1
+  if [[ "$current_nw3" -ne "$selected_nw3" ]]; then
+    NOWHERE_VERSION="$selected"
+    if [[ "$selected_nw3" -eq 0 && "${NOWHERE_ROLE_VALUE:-portal}" == egress ]]; then
+      NOWHERE_PUBLIC_HOST="$(detect_public_host)"
+      NOWHERE_TCP_CARRIER=tcp; NOWHERE_TCP_PORT="$DEFAULT_PORT"
+      NOWHERE_UDP_CARRIER=udp; NOWHERE_UDP_PORT="$DEFAULT_PORT"
+      NOWHERE_ROLE=portal
+    fi
+    configure_values || return 1
+    install_binary "$selected"
+    save_config
+    write_service
+    systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
+  else
   NOWHERE_VERSION="$selected"
   NOWHERE_KEY="${NOWHERE_KEY_VALUE:-}"
   NOWHERE_NEXT="${NOWHERE_NEXT_VALUE:-none}"
   NOWHERE_DIAL="${NOWHERE_DIAL_VALUE:-auto}"
   NOWHERE_DIAL4="${NOWHERE_DIAL4_VALUE:-auto}"
   NOWHERE_DIAL6="${NOWHERE_DIAL6_VALUE:-auto}"
-  migrate_v221_listener_key "$selected" || return
+  migrate_shared_key_for_version "$selected" || return
   NOWHERE_LOG_VALUE="${NOWHERE_LOG_VALUE:-${NOWHERE_LOG:-$DEFAULT_LOG}}"
   NOWHERE_VECTOR_LOG_VALUE="${NOWHERE_VECTOR_LOG_VALUE:-${NOWHERE_VECTOR_LOG:-$DEFAULT_LOG}}"
   normalize_removed_event_logs
   persist_removed_event_log_migration
   install_binary "$selected"
-  persist_v221_key_migration
+  persist_shared_key_migration
   update_saved_version "$selected"
   systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
+  fi
   info "Nowhere updated to ${selected}."
   print_links
   print_tls_fingerprint || true
@@ -1002,79 +1420,211 @@ update_script() {
   cp -p "$SCRIPT_PATH" "$backup"
   mv "$tmp" "$SCRIPT_PATH"; chmod "$mode" "$SCRIPT_PATH"; trap - RETURN
   is_chinese && info "脚本已更新，备份文件：${backup}" || info "Script updated. Backup: ${backup}"
+  is_chinese && info "请退出并重新运行脚本，以加载新版菜单。Nowhere 服务配置保持不变。" || info "Exit and rerun the script to load the updated menu. Nowhere service configuration is unchanged."
 }
-open_tui() { require_root; [[ -x "$BIN_PATH" ]] || die "Nowhere is not installed."; [[ -t 0 && -t 1 ]] || die "The TUI requires an interactive terminal."; "$BIN_PATH" tui; }
+open_tui() {
+  require_root; [[ -x "$BIN_PATH" ]] || die "Nowhere is not installed."; [[ -t 0 && -t 1 ]] || die "The TUI requires an interactive terminal."
+  load_config
+  is_nw3_version "${NOWHERE_VERSION_VALUE:-$NW2_LTS_VERSION}" && die "NW3 has no TUI command; use status, logs, or telemetry."
+  "$BIN_PATH" tui
+}
 uninstall_all() { require_root; require_systemd; systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true; rm -f "$SERVICE_FILE" "$BIN_PATH"; systemctl daemon-reload; warn "Kept ${CONFIG_DIR} to preserve configuration and keys."; }
+
+menu_init_ui() {
+  MENU_WIDTH="${COLUMNS:-}"
+  if [[ ! "$MENU_WIDTH" =~ ^[0-9]+$ ]]; then MENU_WIDTH="$(tput cols 2>/dev/null || printf 80)"; fi
+  [[ "$MENU_WIDTH" =~ ^[0-9]+$ ]] || MENU_WIDTH=80
+  (( MENU_WIDTH >= 12 )) || MENU_WIDTH=80
+  (( MENU_WIDTH <= 96 )) || MENU_WIDTH=96
+  MENU_RESET="" MENU_ACCENT="" MENU_NUMBER="" MENU_TEXT="" MENU_MUTED="" MENU_GOOD="" MENU_WARN="" MENU_BAD="" MENU_CLEAR=""
+  MENU_TOP_LEFT=+ MENU_TOP_RIGHT=+ MENU_BOTTOM_LEFT=+ MENU_BOTTOM_RIGHT=+ MENU_HORIZONTAL=- MENU_VERTICAL='|'
+  if [[ -t 1 && "${TERM:-dumb}" != dumb ]]; then
+    MENU_TOP_LEFT='╔' MENU_TOP_RIGHT='╗' MENU_BOTTOM_LEFT='╚' MENU_BOTTOM_RIGHT='╝' MENU_HORIZONTAL='═' MENU_VERTICAL='║'
+    [[ ! -t 0 ]] || MENU_CLEAR=$'\033[2J\033[H'
+    if [[ ! ${NO_COLOR+x} ]]; then
+      MENU_RESET=$'\033[0m' MENU_ACCENT=$'\033[36m' MENU_NUMBER=$'\033[32m'
+      MENU_TEXT=$'\033[1;37m' MENU_MUTED=$'\033[90m' MENU_GOOD=$'\033[32m'
+      MENU_WARN=$'\033[33m' MENU_BAD=$'\033[31m'
+    fi
+  fi
+}
+
+# Count UTF-8 display cells without depending on the VPS locale.
+menu_text_width() {
+  local LC_ALL=C value="$1" index=0 byte width=0 step
+  while (( index < ${#value} )); do
+    printf -v byte '%d' "'${value:index:1}"
+    byte=$((byte & 255))
+    step=1
+    if (( byte >= 240 )); then step=4; width=$((width + 2))
+    elif (( byte >= 224 )); then step=3; width=$((width + 2))
+    elif (( byte >= 192 )); then step=2; width=$((width + 1))
+    else width=$((width + 1)); fi
+    index=$((index + step))
+  done
+  printf '%s' "$width"
+}
+
+menu_fit_text() {
+  local LC_ALL=C value="${1//[[:cntrl:]]/ }" limit="$2" width index=0 byte step cells used=0 result="" suffix=""
+  width="$(menu_text_width "$value")"
+  if (( width > limit )); then suffix="..."; limit=$((limit - 3)); fi
+  (( limit >= 0 )) || limit=0
+  while (( index < ${#value} )); do
+    printf -v byte '%d' "'${value:index:1}"
+    byte=$((byte & 255))
+    step=1; cells=1
+    if (( byte >= 240 )); then step=4; cells=2
+    elif (( byte >= 224 )); then step=3; cells=2
+    elif (( byte >= 192 )); then step=2; fi
+    (( used + cells <= limit )) || break
+    result="${result}${value:index:step}"
+    used=$((used + cells)); index=$((index + step))
+  done
+  printf '%s%*s%s' "$result" "$((limit - used))" "" "$suffix"
+}
+
+menu_header_rule() {
+  local left="$1" right="$2" index
+  printf '%s%s' "$MENU_ACCENT" "$left"
+  for ((index=0; index < MENU_WIDTH - 2; index++)); do printf '%s' "$MENU_HORIZONTAL"; done
+  printf '%s%s\n' "$right" "$MENU_RESET"
+}
+menu_header_line() {
+  printf '%s%s %s%s%s %s%s\n' "$MENU_ACCENT" "$MENU_VERTICAL" "${2:-$MENU_MUTED}" \
+    "$(menu_fit_text "$1" "$((MENU_WIDTH - 4))")" "$MENU_ACCENT" "$MENU_VERTICAL" "$MENU_RESET"
+}
+menu_section() {
+  local label="$1"; is_chinese && label="$2"
+  printf '\n%s  %s%s\n' "$MENU_ACCENT" "$(menu_fit_text "$label" "$((MENU_WIDTH - 2))")" "$MENU_RESET"
+}
+menu_entry() {
+  local number="$1" label="$2" description="$4"
+  if is_chinese; then label="$3"; description="$5"; fi
+  printf ' %s%2s.%s %s' "$MENU_NUMBER" "$number" "$MENU_RESET" "$MENU_TEXT"
+  if (( MENU_WIDTH >= 76 )); then
+    printf '%s%s  %s%s%s\n' "$(menu_fit_text "$label" 30)" "$MENU_RESET" "$MENU_MUTED" \
+      "$(menu_fit_text "$description" "$((MENU_WIDTH - 37))")" "$MENU_RESET"
+  else
+    printf '%s%s\n' "$(menu_fit_text "$label" "$((MENU_WIDTH - 5))")" "$MENU_RESET"
+  fi
+}
+
+menu_render() {
+  local state="" status status_color="$MENU_WARN" role="${NOWHERE_ROLE_VALUE:-portal}" role_label=Portal host ports="" output tls title
+  if [[ ! -x "$BIN_PATH" ]]; then
+    status="Not installed"; is_chinese && status="未安装"
+  else
+    state="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
+    case "$state" in
+      active) status="Running"; is_chinese && status="运行中"; status_color="$MENU_GOOD" ;;
+      failed) status="Failed"; is_chinese && status="启动失败"; status_color="$MENU_BAD" ;;
+      inactive) status="Stopped"; is_chinese && status="已停止" ;;
+      *) status="Unavailable"; is_chinese && status="状态不可用" ;;
+    esac
+  fi
+  [[ "$role" != egress ]] || role_label=Egress
+  printf '%s\n' "$MENU_CLEAR"
+  menu_header_rule "$MENU_TOP_LEFT" "$MENU_TOP_RIGHT"
+  title="Nowhere VPS Manager"; is_chinese && title="Nowhere VPS 管理脚本"
+  menu_header_line "$title" "$MENU_TEXT"
+  menu_header_line "${status}  |  ${role_label}  |  ${NOWHERE_VERSION_VALUE:--}" "$status_color"
+  if [[ "$role" == egress ]]; then
+    host="${NOWHERE_EGRESS_PORTAL_HOST_VALUE:--}"
+    ports="${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}:${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}"
+    menu_header_line "Portal: ${host}  ${ports}"
+    if is_chinese; then menu_header_line "出口模式：Egress / 主动 QUIC 连接"
+    else menu_header_line "Exit: Egress / outbound QUIC"; fi
+  else
+    host="${NOWHERE_PUBLIC_HOST_VALUE:--}"
+    [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" == none ]] || ports="TCP:${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}"
+    [[ "${NOWHERE_UDP_CARRIER_VALUE:-none}" == none ]] || ports="${ports:+${ports}  }UDP:${NOWHERE_UDP_PORT_VALUE:-$DEFAULT_PORT}"
+    output="${NOWHERE_OUT_VALUE:-direct}"
+    if ! is_nw3_version "${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; then
+      if [[ "${NOWHERE_NEXT_VALUE:-none}" != none ]]; then output=next
+      elif [[ "${NOWHERE_SOCKS_VALUE:-none}" != none ]]; then output=socks; fi
+    fi
+    tls="Self-signed"; is_chinese && tls="自签证书"
+    [[ "${NOWHERE_TLS_VALUE:-1}" != 2 ]] || tls=PEM
+    if is_chinese; then
+      menu_header_line "入口：${host}  ${ports}"
+      menu_header_line "出口：${output}  |  TLS: ${tls}  |  $(client_label "${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}")"
+    else
+      menu_header_line "Host: ${host}  ${ports}"
+      menu_header_line "Exit: ${output}  |  TLS: ${tls}  |  $(client_label "${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}")"
+    fi
+  fi
+  menu_header_rule "$MENU_BOTTOM_LEFT" "$MENU_BOTTOM_RIGHT"
+  menu_section "Deployment & configuration" "部署与配置"
+  menu_entry 1 "Install Portal (Anywhere)" "安装/重装（Anywhere）" "Anywhere import links" "生成 Anywhere 导入链接"
+  menu_entry 2 "Install Portal (Native Vector)" "安装/重装（原生 Vector）" "Native client configuration" "生成原生客户端配置"
+  menu_entry 3 "Install Egress" "安装/重装（Egress）" "Remote exit through Portal" "连接 Portal，提供远程出口"
+  menu_entry 4 "Quick default install" "快速默认安装" "Anywhere / default settings" "Anywhere / 全部使用默认值"
+  menu_entry 5 "Reconfigure" "修改配置" "Ports, TLS, Morph and exit" "端口、证书、Morph 和出口"
+  menu_entry 6 "Install a selected release" "指定 Release 安装" "Choose a release" "查看并选择发行版本"
+  menu_entry 7 "Update Nowhere binary" "更新 Nowhere 二进制" "Update or migrate protocol" "更新版本或切换协议"
+  menu_section "Service management" "服务管理"
+  menu_entry 8 "Start service" "启动服务" "Start the saved deployment" "启动已保存的服务"
+  menu_entry 9 "Stop service" "停止服务" "Stop the running service" "关停当前服务"
+  menu_entry 10 "Restart service" "重启服务" "Reload the saved configuration" "重新加载已保存配置"
+  menu_entry 11 "Instance status" "查看 Nowhere 实例状态" "Traffic and active flows" "流量统计与活跃连接"
+  menu_entry 12 "Probe TCP connectivity" "测试 TCP 连通性" "Test a target through Portal" "通过 Portal 测试目标连接"
+  menu_entry 13 "Systemd service status" "查看 systemd 服务状态" "Process status and recent logs" "进程状态及最近日志"
+  menu_entry 14 "Terminal UI (NW2 only)" "打开终端界面（仅 NW2）" "Interactive NW2 dashboard" "NW2 原生交互面板"
+  menu_entry 15 "Follow logs" "查看实时日志" "Live service output" "实时查看服务输出"
+  menu_section "Links & maintenance" "链接与维护"
+  menu_entry 16 "Client links / QR code" "打印客户端链接 / 二维码" "Share or import the node" "分享或导入当前节点"
+  menu_entry 17 "Certificate SHA-256" "查看证书 SHA-256" "Current Portal fingerprint" "查询 Portal 证书指纹"
+  menu_entry 18 "Generate shared key" "生成共享密钥" "Generate a key without applying it" "生成新密钥，不自动替换配置"
+  menu_entry 19 "Inspect remote fingerprint" "查询远端证书指纹" "Inspect a remote Portal" "查询远端 Portal 的证书"
+  menu_entry 20 "Uninstall service" "卸载服务" "Keep saved configuration and keys" "保留已保存的配置与密钥"
+  menu_section "Script settings" "脚本设置"
+  menu_entry 21 "Switch language" "切换语言" "English / 简体中文" "English / 简体中文"
+  menu_entry 22 "Update deployment script" "更新部署脚本" "Download the latest script" "下载最新部署脚本"
+  printf '\n'
+  menu_entry q "Exit" "退出" "Also accepts 0" "也可输入 0"
+  printf '\n'
+}
+
+menu_dispatch() {
+  case "$1" in
+    1) install_default ;; 2) install_vector ;; 3) install_egress ;; 4) quick_install ;;
+    5) configure_all ;; 6) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;;
+    7) update_all ;; 8) service_cmd start ;; 9) service_cmd stop ;; 10) service_cmd restart ;;
+    11) run_nowhere_status ;; 12) run_probe ;; 13) service_cmd status ;; 14) open_tui ;;
+    15) journalctl -u "$SERVICE_NAME" -f ;; 16) print_links ;; 17) print_tls_fingerprint ;;
+    18) run_generate_key ;; 19) prompt_remote_fingerprint ;; 20) uninstall_all ;;
+    22) update_script ;;
+    *) is_chinese && warn "未知选项: $1" || warn "Unknown option: $1" ;;
+  esac
+}
 
 menu() {
   require_root; require_systemd
   load_config; resolve_language; update_saved_language
+  local choice prompt
   while true; do
-    if is_chinese; then cat <<'EOF'
-
-==============================
- Nowhere VPS 管理脚本
-==============================
-  1) 安装/重装（Anywhere）
-  2) 安装/重装（原生 Vector）
-  3) 快速默认安装（Anywhere）
-  4) 修改配置
-  5) 指定 Release 安装
-  6) 更新 Nowhere 二进制
-  7) 启动服务
-  8) 停止服务
-  9) 重启服务
- 10) 查看 Nowhere 实例状态（2.1.2+）
- 11) 测试 TCP 连通性（2.1.2+）
- 12) 查看 systemd 服务状态
- 13) 打开终端界面
-  14) 查看实时日志
-  15) 打印客户端链接 / 二维码
-  16) 查看证书 SHA-256
- 17) 生成共享密钥（2.2.0+）
- 18) 查询远端证书指纹（2.2.0+）
- 19) 卸载服务
- 20) 切换语言
- 21) 更新部署脚本
-  0) 退出
-EOF
-    else cat <<'EOF'
-
-==============================
- Nowhere VPS Manager
-==============================
-  1) Install/Reinstall (Anywhere)
-  2) Install/Reinstall (Native Vector)
-  3) Quick default install (Anywhere)
-  4) Reconfigure
-  5) Select a Release and install
-  6) Update Nowhere binary
-  7) Start service
-  8) Stop service
-  9) Restart service
- 10) Show Nowhere instance status (v2.1.2+)
- 11) Probe TCP connectivity (v2.1.2+)
- 12) Show systemd service status
- 13) Open Terminal UI
- 14) Follow logs
- 15) Print client links / QR code
- 16) Show certificate SHA-256
- 17) Generate shared key (v2.2.0+)
- 18) Inspect remote certificate fingerprint (v2.2.0+)
- 19) Uninstall
- 20) Switch language
- 21) Update deployment script
-  0) Exit
-EOF
+    load_config; menu_init_ui; menu_render
+    prompt="? Choose: "; is_chinese && prompt="? 请选择: "
+    printf '%s%s%s' "$MENU_ACCENT" "$prompt" "$MENU_RESET"
+    read -r choice || return 0
+    case "$choice" in
+      0|q|Q) return 0 ;;
+      21) change_language ;;
+      *) set +e; (set -e; menu_dispatch "$choice"); set -e ;;
+    esac
+    if [[ -t 0 ]]; then
+      prompt="Press Enter to return to the menu..."; is_chinese && prompt="按回车返回主菜单..."
+      printf '\n%s%s%s' "$MENU_MUTED" "$prompt" "$MENU_RESET"
+      read -r choice || return 0
     fi
-    if is_chinese; then read -r -p "请选择: " choice; else read -r -p "Choose: " choice; fi
-    case "$choice" in 1) install_default || true ;; 2) install_vector || true ;; 3) quick_install || true ;; 4) configure_all || true ;; 5) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all || true; } ;; 6) update_all || true ;; 7) service_cmd start ;; 8) service_cmd stop ;; 9) service_cmd restart ;; 10) run_nowhere_status || true ;; 11) run_probe || true ;; 12) service_cmd status ;; 13) open_tui ;; 14) journalctl -u "$SERVICE_NAME" -f ;; 15) print_links ;; 16) print_tls_fingerprint || true ;; 17) run_generate_key || true ;; 18) prompt_remote_fingerprint || true ;; 19) uninstall_all ;; 20) change_language ;; 21) update_script ;; 0) exit 0 ;; *) is_chinese && warn "未知选项: ${choice}" || warn "Unknown option: ${choice}" ;; esac
   done
 }
 
 case "$ACTION" in
   install|install-anywhere|anywhere) install_default ;;
   install-vector|vector) install_vector ;;
+  install-egress|egress) install_egress ;;
   configure|config) configure_all ;;
   update) update_all ;;
   update-script|script-update|self-update) update_script ;;

@@ -7,30 +7,29 @@ An interactive deployment and management script for a Linux VPS running
 
 ## Scope
 
-The default install version is `v2.2.1`. The release picker lists supported
-Nowhere releases and omits V1; pressing Enter during update selects the latest
-listed release. It generates
-`nowhere://` links for Anywhere plus `vector://` URLs for the native Vector client.
+New installs use `v3.0.0` by default. The release picker offers stable NW3
+releases and the fixed NW2 LTS baseline `v2.2.1`. Pressing Enter during an
+update selects the newest supported release on the current protocol line. The
+script generates `nowhere://` links for Anywhere and `vector://` URLs for the
+native Vector client. Existing stable NW2 installations remain recognized for
+upgrade, while only the LTS baseline is offered as an NW2 install target.
 
 ## Features
 
 - Interactive wizard: press Enter at every prompt for sensible defaults.
-- Downloads a selected supported release and manages one systemd Portal service.
+- Downloads a selected release and manages one systemd service as an NW2/NW3
+  Portal or an NW3 Egress.
 - Endpoint forms: shared TCP/UDP port, independent ports, TCP-only,
   UDP-only, and `tcp4`/`tcp6`/`udp4`/`udp6` address-family restrictions.
-- Portal TLS modes, `morph`, rate limits, outbound SOCKS5, native `next` Portal
-  chaining, Mux, SNI, certificate pinning, logs, TCP Morph prelude mode, and
-  transport environment settings.
-- Nowhere 2.2 shared-key validation and migration, 32-character key generation,
-  independent `dial4`/`dial6` source binding, and remote certificate inspection.
-- Native Vector URL generation with fixed or `mix` routes, Mux, SNI, pin,
-  rate limits, logs, and local SOCKS5 listener.
-- Anywhere TCP and UDP import links, plus a terminal QR code for the preferred
-  available carrier.
-- Terminal UI, logs, service lifecycle commands, and TLS certificate SHA-256
-  fingerprint output.
-- Read-only instance telemetry and one-shot TCP Flow connectivity probes
-  (Nowhere `v2.1.2` and later).
+- NW2 LTS Portal configuration at the `v2.2.1` baseline, including SOCKS5 and
+  native `next`, separate carriers, Morph settings, SNI, certificate pins, and
+  dual-stack source binding.
+- NW3 Portal and Egress configuration, including direct/SOCKS5/Egress exits,
+  Egress registration, exact 32-character shared keys, and Morph.
+- Anywhere and Native Vector links for NW2/NW3, with QR output and automatic
+  certificate pinning for available self-signed Portal fingerprints.
+- Shared-key generation, remote certificate inspection, logs, service lifecycle
+  commands, instance status, and TCP Flow probes. The TUI is available on NW2.
 
 ## Quick Start
 
@@ -43,36 +42,40 @@ sudo bash nowhere-vps.sh
 ```
 
 On the first interactive run, choose English or Simplified Chinese. The choice
-is saved and can later be changed from menu item `20`, or selected explicitly
+is saved and can later be changed from menu item `21`, or selected explicitly
 with `--lang en` or `--lang zh`.
 
-The default install enables both unrestricted TCP and UDP carriers on port
-`2077`, creates an ephemeral self-signed certificate, and prints Anywhere
-links. Open the same TCP and UDP port in both the VPS firewall and cloud security
-group.
+The default install creates an NW3 Portal with TCP and UDP on port `2077`,
+Morph enabled, a self-signed certificate, and Anywhere links. Open TCP and UDP
+`2077` in both the VPS firewall and cloud security group.
+
+The main menu shows service status and a configuration summary, with grouped
+actions and descriptions. Narrow terminals hide the description column. After
+an action, press Enter to return; enter `q` or `0` to exit.
 
 ```text
-1) Install/Reinstall (Anywhere)
-2) Install/Reinstall (Native Vector)
-3) Quick default install (Anywhere)
-4) Reconfigure
-5) Select a Release and install
-6) Update Nowhere binary
-7) Start service
-8) Stop service
-9) Restart service
-10) Show Nowhere instance status (v2.1.2+)
-11) Probe TCP connectivity (v2.1.2+)
-12) Show systemd service status
-13) Open Terminal UI
-14) Follow logs
-15) Print client links / QR code
-16) Show certificate SHA-256
-17) Generate shared key (v2.2.0+)
-18) Inspect remote certificate fingerprint (v2.2.0+)
-19) Uninstall
-20) Switch language
-21) Update deployment script
+1) Install/Reinstall Portal (Anywhere)
+2) Install/Reinstall Portal (Native Vector)
+3) Install/Reinstall NW3 Egress
+4) Quick default install (Anywhere)
+5) Reconfigure
+6) Select a Release and install
+7) Update Nowhere binary
+8) Start service
+9) Stop service
+10) Restart service
+11) Show Nowhere instance status
+12) Probe TCP connectivity
+13) Show systemd service status
+14) Open Terminal UI (NW2 only)
+15) Follow logs
+16) Print client links / QR code
+17) Show certificate SHA-256
+18) Generate shared key
+19) Inspect remote certificate fingerprint
+20) Uninstall
+21) Switch language
+22) Update deployment script
 ```
 
 For non-interactive defaults:
@@ -104,8 +107,8 @@ portal://key@*/tcp:443/udp:8443?tls=1&morph=1
 suffixes are retained in native Vector URLs. Anywhere links use ordinary TCP
 and UDP routes.
 
-Portal outbound source binding supports either the legacy single-family `dial`
-mode or the Nowhere 2.2 `dial4`/`dial6` mode. The modes are mutually exclusive;
+Portal outbound source binding supports either the single-address `dial` mode
+or the `dial4`/`dial6` mode. The modes are mutually exclusive;
 `dial4` and `dial6` may be configured independently or together. Use bare local
 IP addresses, without brackets or ports:
 
@@ -114,69 +117,81 @@ sudo bash nowhere-vps.sh configure --dial4 192.0.2.10 --dial6 2001:db8::10
 ```
 
 These options affect Portal outbound connections, including direct, SOCKS5,
-and native `next` paths. They do not change inbound listeners or standalone
+and NW2 native `next` paths. They do not change inbound listeners or standalone
 Vector/probe source selection. Explicit bindings do not silently fall back to
 automatic source selection.
 
 ## Portal Outbound Paths
 
-Portal can connect to targets directly, through an outbound SOCKS5 proxy, or via
-a native next-hop Portal. The wizard offers one of `direct`, `socks`, or `next`;
-SOCKS and `next` are mutually exclusive.
+NW2 Portal can connect to targets directly, through an outbound SOCKS5 proxy,
+or via a native next-hop Portal. The wizard offers one of `direct`, `socks`, or
+`next`; SOCKS and `next` are mutually exclusive.
 
-Use `--next key@host:port` or an explicit carrier endpoint to configure a
+Use `--next key@host:port` or an explicit carrier endpoint to configure an NW2
 next-hop Portal. Its route policy and TLS settings are available through
 `--next-up`, `--next-down`, `--next-mux`, `--next-sni`, and `--next-pin`.
 
+NW3 Portal selects one fixed target path: `direct`, `socks`, or `egress`. The
+`egress` path requires a UDP carrier on the Portal and a separately deployed
+NW3 Egress that connects outbound to it. NW3 does not use the NW2 `next` option.
+
+### Egress Deployment
+
+First install or reconfigure the public NW3 Portal with `out=egress` and an
+enabled UDP carrier. Then deploy an NW3 Egress on the exit VPS from menu item
+`3` or with `install-egress`. Enter the Portal's UDP address and port, the same
+32-character shared key, and the Portal's SNI or certificate pin when needed.
+The Egress initiates an outbound QUIC connection, so it needs no inbound
+firewall port. The Portal and Egress must use the same key and Morph setting.
+
+```bash
+sudo bash nowhere-vps.sh install-egress \
+  --egress-portal-host portal.example.com \
+  --egress-portal-udp-port 2077 \
+  --key 0123456789abcdef0123456789abcdef
+```
+
+For a self-signed Portal certificate, get its SHA-256 fingerprint on the Portal
+VPS and pass it as `--egress-pin`. If the certificate is trusted by the system,
+leave the pin as `none`; set `--egress-sni` when its certificate name differs
+from the Portal address. An Egress route has no direct fallback when the Egress
+is offline.
+
+To bind target connections to a source address, set `--dial`, `--dial4`, or
+`--dial6` on the Egress. These options affect Egress-to-target connections, not
+its QUIC connection to Portal. Portal `out=egress` cannot use Portal-side dial
+bindings.
+
 ## Morph and Upgrades
 
-`morph=0` is the default. With `morph=1`, Nowhere `v2.1.0` changes the Morph
-wire format and cannot communicate with a `v2.0.x` Morph peer. Before upgrading
-a Morph-enabled Portal from `v2.0.x` to `v2.1.0` or later, upgrade every
-affected Anywhere client, native Vector node, and native `next` hop together.
+NW2 is maintained at the `v2.2.1` LTS baseline. It accepts 32–64-character
+lowercase hexadecimal Portal and native `next` keys; newly generated keys are
+32 characters, and existing valid 64-character keys are preserved. NW2 also
+verifies certificate chains and names for Native Vector, `probe`, and native
+`next` connections. A self-signed certificate requires its exact SHA-256 pin.
 
-The interactive update flow requires typing `UPGRADE` at this compatibility
-boundary. Non-interactive automation is refused unless the coordinated rollout
-has been completed and `--allow-morph-breaking-upgrade` is supplied.
-
-Nowhere `v2.1.1` removes the `event` log level. When updating or reconfiguring
-to `v2.1.1` or later, this script automatically changes a saved `event` level
-to `info`; older selected releases continue to accept `event`.
-
-Nowhere `v2.2.1` requires every Portal listener and enabled native `next` shared
-key to be 32–64 lowercase hexadecimal characters. New installs generate a
-32-character key (16 random bytes); existing 64-character keys remain valid
-and are preserved. When updating an older saved installation, the script offers
-to rotate an incompatible listener key; accepting invalidates its old client
-links, which must be imported again. Invalid `next` keys stop the update before
-replacing the binary. For a Portal chain, coordinate a fresh key for each hop
-and set the identical key on both ends before upgrading that hop.
-The `nw2` wire contract remains compatible with `v2.1.2`; this is a key and
-certificate-trust configuration change, not a relay wire-protocol migration.
-
-Nowhere 2.2 also verifies certificate chains and names by default for Native
-Vector, `probe`, and native `next` connections. `sni=none` does not disable
-verification. A self-signed certificate needs its exact SHA-256 pin. For the
-default in-memory self-signed certificate, this script adds the current pin to
-generated Vector URLs when available; that pin changes whenever the service
-restarts. Use a stable CA-trusted PEM certificate for links that should survive
-restarts.
+NW3 is the default protocol line and enables Morph by default. NW2 and NW3 use
+incompatible wire protocols, so switching between them requires a coordinated
+client and server migration. The script asks for explicit confirmation before
+the cutover; non-interactive updates require `--allow-protocol-breaking-upgrade`.
+Stable releases within the NW3 line can be selected without the cross-line
+migration prompt.
 
 For TCP Morph connections initiated by the local Nowhere process, choose the
 client-side prelude mode with `--morph-tcp-prelude low7|full8`. `full8` is the
-default in Nowhere 2.2; `low7` remains available. This setting affects native
-outbound connections such as `next`; it is not included in Anywhere import
-links.
+default; this affects NW2 native `next` and NW3 native TLS connections. It is
+not included in Anywhere import links.
 
 ## Client Output
 
 Anywhere links are generated separately for TCP and UDP, so they stay within
 its supported fixed-route model. Native Vector supports the full policy set:
 
-Anywhere SNI defaults to the public host in the link. Set `--anywhere-sni` when
-the client-facing address differs from the certificate's DNS name; the script
-adds an encoded `sni` parameter to the Anywhere links. The interactive wizard
-also offers this setting when Anywhere output is enabled. For example:
+For NW2, Anywhere SNI defaults to the public host in the link. Set
+`--anywhere-sni` when the client-facing address differs from the certificate's
+DNS name; the script adds an encoded `sni` parameter to the Anywhere links. The
+interactive wizard also offers this setting when Anywhere output is enabled.
+For example:
 
 ```bash
 sudo bash nowhere-vps.sh configure \
@@ -198,16 +213,16 @@ The Vector options are `--vector-up`, `--vector-down`, `--mux`,
 
 The fingerprint command prints the SHA-256 fingerprint for the certificate
 loaded by Portal, whether it is self-signed (`tls=1`) or supplied as PEM
-(`tls=2`). It probes the live local TCP endpoint first and falls back to the
-Nowhere log when probing is unavailable, so hot-reloaded PEM certificates are
-reported correctly. A self-signed fingerprint changes after every service
-restart; a PEM fingerprint changes when that certificate is renewed.
+(`tls=2`). It inspects the local TCP endpoint with Nowhere first, then falls back
+to the current service invocation's journal. UDP-only deployments use the
+journal. A self-signed fingerprint changes after
+every service restart; a PEM fingerprint changes when that certificate is renewed.
 
 ```bash
 sudo bash nowhere-vps.sh fingerprint
 ```
 
-Nowhere 2.2 Native Vector links include a current self-signed certificate pin
+Native Vector links include a current self-signed certificate pin
 when the fingerprint is available. Anywhere `nowhere://` links do not carry a
 pin parameter; add the displayed SHA-256 fingerprint to Anywhere's Trusted
 Certificates when using a self-signed certificate. The in-memory certificate
@@ -215,8 +230,8 @@ is regenerated after every service restart, so its trusted fingerprint must
 then be refreshed. For a self-signed PEM certificate, set `--pin` for Native
 Vector or `--next-pin` for a native Portal chain.
 
-Generate a key or inspect a remote Portal certificate with the Nowhere 2.2
-utilities:
+Generate a key or inspect a remote Portal certificate with the supported
+Nowhere utilities:
 
 ```bash
 sudo bash nowhere-vps.sh generate-key
@@ -225,8 +240,7 @@ sudo bash nowhere-vps.sh fingerprint 'nowhere://key@proxy.example.com:2077?morph
 
 Remote fingerprint inspection sends no Portal authentication or application
 traffic. Verify the reported value through a trusted channel before pinning it.
-These wrapper commands require the local Nowhere binary to be installed at
-`v2.2.0` or later.
+These wrapper commands are available for the NW2 LTS baseline and NW3.
 
 For a supplied certificate use absolute paths:
 
@@ -262,11 +276,16 @@ sudo bash nowhere-vps.sh uninstall
 
 Run `bash nowhere-vps.sh --help` for the complete option list.
 
+Existing scripts can download this version through their **Update deployment
+script** option or `update-script` command. Exit and rerun the script after the
+download to load the new menu. Script updates preserve the saved configuration,
+keys and running service; upgrading the Nowhere binary is a separate action.
+
 `status` reports the systemd service state; `telemetry` runs Nowhere's local
 read-only instance snapshot. `probe` builds a temporary Vector URL from the
 saved server settings and tests one TCP Flow to the requested target without
-printing the shared key or sending application payload. These two commands
-require an installed Nowhere binary `v2.1.2` or later.
+printing the shared key or sending application payload. All three commands are
+available on the NW2 LTS baseline and NW3.
 
 ## Files
 
