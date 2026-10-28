@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO="NodePassProject/Nowhere"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh"
+SCRIPT_VERSION="2026.10.28"
+SCRIPT_UPDATE_AVAILABLE_VERSION=""
 SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || printf '%s' "$SCRIPT_PATH")"; fi
 SERVICE_NAME="nowhere"
@@ -1464,6 +1466,22 @@ update_all() {
   print_links
   print_tls_fingerprint || true
 }
+script_version_from_file() {
+  sed -nE 's/^SCRIPT_VERSION="([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' "$1" | head -n 1
+}
+check_script_update() (
+  # This check only reads remote metadata; it never executes downloaded code.
+  [[ -f "$SCRIPT_PATH" ]] && command -v curl >/dev/null 2>&1 || exit 0
+  tmp="" remote=""
+  tmp="$(mktemp)" || exit 0
+  trap 'rm -f "$tmp"' EXIT
+  curl -fsSL --connect-timeout 2 --max-time 3 --max-filesize 262144 \
+    -o "$tmp" "$SCRIPT_RAW_URL" >/dev/null 2>&1 || exit 0
+  remote="$(script_version_from_file "$tmp")"
+  [[ "$remote" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || exit 0
+  [[ "$remote" != "$SCRIPT_VERSION" ]] && version_at_least "$remote" "$SCRIPT_VERSION" || exit 0
+  printf '%s' "$remote"
+)
 update_script() {
   local tmp backup mode
   [[ -f "$SCRIPT_PATH" ]] || die "Cannot update a script run from a pipe. Download it to a file first."
@@ -1613,6 +1631,15 @@ menu_render() {
       menu_header_line "Exit: ${output}  |  TLS: ${tls}  |  $(client_label "${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}")"
     fi
   fi
+  if [[ -n "$SCRIPT_UPDATE_AVAILABLE_VERSION" ]]; then
+    if [[ "$(script_version_from_file "$SCRIPT_PATH")" == "$SCRIPT_UPDATE_AVAILABLE_VERSION" ]]; then
+      if is_chinese; then menu_header_line "脚本新版已下载，请退出并重新运行" "$MENU_WARN"
+      else menu_header_line "Script downloaded. Exit and rerun to load it." "$MENU_WARN"; fi
+    else
+      if is_chinese; then menu_header_line "脚本有更新：${SCRIPT_UPDATE_AVAILABLE_VERSION}，选 22 更新" "$MENU_WARN"
+      else menu_header_line "Script update: ${SCRIPT_UPDATE_AVAILABLE_VERSION}. Choose 22." "$MENU_WARN"; fi
+    fi
+  fi
   menu_header_rule "$MENU_BOTTOM_LEFT" "$MENU_BOTTOM_RIGHT"
   menu_section "Deployment & configuration" "部署与配置"
   menu_entry 1 "Install Portal (Anywhere)" "安装/重装（Anywhere）" "Anywhere import links" "生成 Anywhere 导入链接"
@@ -1662,6 +1689,7 @@ menu() {
   require_root; require_systemd
   load_config; resolve_language; update_saved_language
   local choice prompt
+  if [[ -t 0 && -t 1 ]]; then SCRIPT_UPDATE_AVAILABLE_VERSION="$(check_script_update)"; fi
   while true; do
     load_config; menu_init_ui; menu_render
     prompt="? Choose: "; is_chinese && prompt="? 请选择: "

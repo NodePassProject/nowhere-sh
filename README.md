@@ -55,6 +55,10 @@ The main menu shows service status and a configuration summary, with grouped
 actions and descriptions. Narrow terminals hide the description column. After
 an action, press Enter to return; enter `q` or `0` to exit.
 
+Opening the interactive menu checks for a newer deployment script once, with
+a three-second timeout. When available, a notice points to item `22`. Network
+failures are ignored. The check never installs updates or changes the service.
+
 ```text
 1) Install/Reinstall Portal (Anywhere)
 2) Install/Reinstall Portal (Native Vector)

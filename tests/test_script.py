@@ -240,6 +240,47 @@ DIAL4_EXPLICIT=1; NOWHERE_DIAL4=192.0.2.2; configure_values
         self.assertEqual((unquote(username), unquote(password), unquote(endpoint)),
                          ("alice", "p@ss:word", "127.0.0.1:1080"))
 
+    def test_startup_update_check_is_read_only_and_ignores_invalid_versions(self):
+        for remote, expected in (("2026.10.29", "2026.10.29"), ("2026.10.28", ""),
+                                  ("2026.10.27", ""), ("invalid", "")):
+            with self.subTest(remote=remote):
+                before = self.config.read_bytes()
+                result = self.shell('''curl() {
+  [[ "$*" == *"--connect-timeout 2 --max-time 3"* ]] || return 1
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -o) output="$2"; shift 2 ;; *) shift ;; esac
+  done
+  printf 'SCRIPT_VERSION="%s"\\n' "$TEST_REMOTE" >"$output"
+  printf 'touch "$TEST_DIR/should-not-exist"\\n' >>"$output"
+}
+check_script_update
+''', env={"TEST_REMOTE": remote, "TMPDIR": str(self.directory)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+                self.assertEqual(self.config.read_bytes(), before)
+                self.assertEqual(list(self.directory.iterdir()), [self.config])
+
+    def test_startup_update_check_failure_is_silent(self):
+        result = self.shell("curl() { return 28; }; check_script_update")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
+
+    def test_update_notice_survives_redraw_and_language_switch(self):
+        for language, phrase in (("en", "Script update:"), ("zh", "脚本有更新：")):
+            result = self.shell('''SCRIPT_UPDATE_AVAILABLE_VERSION=2026.10.29
+load_config; menu_init_ui; menu_render; menu_render
+''', env={"NOWHERE_LANG": language, "COLUMNS": "80"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.count(phrase), 2)
+        result = self.shell('''SCRIPT_PATH="$TEST_DIR/downloaded.sh"
+printf 'SCRIPT_VERSION="2026.10.29"\\n' >"$SCRIPT_PATH"
+SCRIPT_UPDATE_AVAILABLE_VERSION=2026.10.29
+load_config; menu_init_ui; menu_render
+''', env={"NOWHERE_LANG": "en", "COLUMNS": "80"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Exit and rerun", result.stdout)
+
     def test_saved_values_preserve_shell_metacharacters(self):
         result = self.shell('''printf 'ROUND_TRIP=%s\\n' "$(env_quote "$TEST_VALUE")" >"$TEST_DIR/round-trip.env"
 source "$TEST_DIR/round-trip.env"
