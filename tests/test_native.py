@@ -63,7 +63,8 @@ journalctl() { [[ -n "${TEST_LOG:-}" ]] && cat "$TEST_LOG"; }
         self.fail(log.read_text())
 
     def test_real_nw2_and_nw3_connections(self):
-        for version, binary_name in (("v2.2.1", "NW2_BINARY"), ("v3.0.0", "NW3_BINARY")):
+        for version, binary_name in (("v2.2.1", "NW2_BINARY"),
+                                     (os.environ.get("NW3_TEST_VERSION", "v3.0.0"), "NW3_BINARY")):
             with self.subTest(version=version):
                 config = self.directory / "nowhere.env"
                 config.unlink(missing_ok=True)
@@ -74,7 +75,7 @@ journalctl() { [[ -n "${TEST_LOG:-}" ]] && cat "$TEST_LOG"; }
                 portal_url = self.shell('''NOWHERE_VERSION="$TEST_VERSION"; NOWHERE_KEY="$TEST_KEY"
 NOWHERE_LISTEN_HOST=127.0.0.1; NOWHERE_PUBLIC_HOST=127.0.0.1
 NOWHERE_TCP_PORT="$TEST_TCP"; NOWHERE_UDP_PORT="$TEST_UDP"; NOWHERE_MORPH=1
-[[ "$NOWHERE_VERSION" != v3.0.0 ]] || NOWHERE_OUT=egress
+[[ "$NOWHERE_VERSION" != v3.* ]] || NOWHERE_OUT=egress
 configure_values; save_config; printf '%s' "$NOWHERE_SERVICE_URL"
 ''', **common)
                 portal, portal_log = self.start(binary, portal_url)
@@ -82,11 +83,11 @@ configure_values; save_config; printf '%s' "$NOWHERE_SERVICE_URL"
                 common["TEST_LOG"] = str(portal_log)
                 live_pin = self.shell("load_config; current_local_tls_fingerprint", **common)
                 self.assertEqual(live_pin, pin)
-                if version == "v3.0.0":
+                if version.startswith("v3."):
                     udp_pin = self.shell("load_config; NOWHERE_TCP_CARRIER_VALUE=none; current_local_tls_fingerprint",
                                          **common)
                     self.assertEqual(udp_pin, pin)
-                    egress_url = self.shell('''NOWHERE_VERSION=v3.0.0; NOWHERE_ROLE=egress
+                    egress_url = self.shell('''NOWHERE_VERSION="$TEST_VERSION"; NOWHERE_ROLE=egress
 NOWHERE_EGRESS_PORTAL_HOST=127.0.0.1; NOWHERE_EGRESS_PORTAL_UDP_PORT="$TEST_UDP"
 NOWHERE_EGRESS_PIN="$TEST_PIN"; configure_values; printf '%s' "$NOWHERE_SERVICE_URL"
 ''', TEST_PIN=pin, **common)
@@ -109,10 +110,10 @@ build_probe_vector_url
                             break
                         time.sleep(0.2)
                     self.assertEqual(probe.returncode, 0, probe.stderr + portal_log.read_text())
-                if version == "v3.0.0":
+                if version.startswith("v3."):
                     self.assertIsNone(egress.poll(), egress_log.read_text())
                     auth_port = self.unused_port()
-                    auth_url = self.shell('''NOWHERE_VERSION=v3.0.0; NOWHERE_ROLE=portal
+                    auth_url = self.shell('''NOWHERE_VERSION="$TEST_VERSION"; NOWHERE_ROLE=portal
 NOWHERE_TCP_PORT="$TEST_AUTH_PORT"; NOWHERE_UDP_CARRIER=none; NOWHERE_OUT=socks
 NOWHERE_TCP_CARRIER=tcp
 NOWHERE_OUT_SOCKS='alice:p@ss:word@127.0.0.1:1080'

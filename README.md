@@ -7,9 +7,10 @@ An interactive deployment and management script for a Linux VPS running
 
 ## Scope
 
-New installs use `v3.0.0` by default. The release picker offers stable NW3
-releases and the fixed NW2 LTS baseline `v2.2.1`. Pressing Enter during an
-update selects the newest supported release on the current protocol line. The
+New installs use `v3.1.0` by default. The release picker offers NW3 releases
+and the fixed NW2 LTS baseline `v2.2.1`. GitHub prereleases are labelled `(pre)`
+and can be selected by number. Pressing Enter during an update selects the
+newest formal release on the current protocol line. The
 script generates `nowhere://` links for Anywhere and `vector://` URLs for the
 native Vector client. Existing stable NW2 installations remain recognized for
 upgrade, while only the LTS baseline is offered as an NW2 install target.
@@ -34,6 +35,7 @@ upgrade, while only the LTS baseline is offered as an NW2 install target.
 ## Quick Start
 
 Requirements: Linux, systemd, `curl`, `tar`, and an `x86_64` or `aarch64` VPS.
+The release picker additionally needs `python3` or `jq` to read GitHub metadata.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
@@ -174,13 +176,20 @@ NW3 is the default protocol line and enables Morph by default. NW2 and NW3 use
 incompatible wire protocols, so switching between them requires a coordinated
 client and server migration. The script asks for explicit confirmation before
 the cutover; non-interactive updates require `--allow-protocol-breaking-upgrade`.
-Stable releases within the NW3 line can be selected without the cross-line
-migration prompt.
+Releases within the NW3 line do not require the cross-line migration prompt.
+However, Portal v3.2.0+ requires authenticated preludes for Morph TCP. Before
+upgrading across this boundary, update native Vector clients to v3.1.0+ and
+verify support in Anywhere or other clients. The script asks for confirmation
+on affected installs, reinstalls and updates; non-interactive runs require
+`--allow-prelude-breaking-upgrade`. QUIC and non-Morph TLS are unaffected.
+Shared keys, certificates and share-link formats do not need migration.
 
 For TCP Morph connections initiated by the local Nowhere process, choose the
-client-side prelude mode with `--morph-tcp-prelude low7|full8`. `full8` is the
-default; this affects NW2 native `next` and NW3 native TLS connections. It is
-not included in Anywhere import links.
+client-side prelude mode with `--morph-tcp-prelude fade|low7|full8`. New NW3
+v3.0.1+ configurations default to `fade`; NW2 LTS and NW3 v3.0.0 use `full8`.
+Existing explicit settings are preserved. This affects NW2 native `next` and
+NW3 native TLS connections and is not included in Anywhere import links.
+Selecting `low7` or `full8` does not disable authenticated preludes.
 
 ## Client Output
 

@@ -153,6 +153,78 @@ choose_release_version <<<""
         self.assertNotIn("v2.1.2", result.stdout)
         self.assertNotIn("v1.8.3", result.stdout)
 
+    def test_prereleases_are_labelled_and_can_be_selected(self):
+        result = self.shell('''fetch_recent_releases() { printf 'v3.2.0\\ttrue\\nv3.1.0\\tfalse\\n'; }
+choose_release_version <<<""
+[[ "$SELECTED_VERSION" == v3.1.0 ]]
+choose_release_version <<<"1"
+[[ "$SELECTED_VERSION" == v3.2.0 ]]
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("v3.2.0 (pre)", result.stdout)
+        self.assertNotIn("v3.1.0 (pre)", result.stdout)
+
+    def test_release_metadata_parser(self):
+        result = self.shell('''parse_release_metadata <<'JSON'
+[{"prerelease":true,"tag_name":"v3.2.0","draft":false},
+ {"draft":false,"tag_name":"v3.1.0","prerelease":false},
+ {"tag_name":"v3.3.0","prerelease":false,"draft":true}]
+JSON
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "v3.2.0\ttrue\nv3.1.0\tfalse\n")
+
+    def test_release_fetch_failure_is_not_hidden(self):
+        result = self.shell('''fetch_recent_releases() { return 1; }
+choose_release_version <<<""
+''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Cannot fetch", result.stderr)
+
+    def test_fade_support_and_defaults_follow_selected_version(self):
+        for version, expected in (("v2.2.1", "full8"), ("v3.0.0", "full8"),
+                                  ("v3.0.1", "fade"), ("v3.1.0", "fade"), ("v3.2.0", "fade")):
+            with self.subTest(version=version):
+                self.config.unlink(missing_ok=True)
+                result = self.shell('''ASSUME_YES=1; NOWHERE_VERSION="$TEST_VERSION"
+configure_values
+[[ "$NOWHERE_MORPH_TCP_PRELUDE" == "$TEST_EXPECTED" ]]
+if [[ "$TEST_EXPECTED" == fade ]]; then validate_morph_tcp_prelude fade
+else ! validate_morph_tcp_prelude fade; fi
+''', env={"TEST_VERSION": version, "TEST_EXPECTED": expected})
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_authenticated_prelude_confirmation(self):
+        for current, selected, morph, carrier, role, allowed, success in (
+            ("v3.1.0", "v3.2.0", "1", "tcp", "portal", "0", False),
+            ("v3.1.0", "v3.2.0", "1", "tcp", "portal", "1", True),
+            ("v3.0.0", "v3.1.0", "1", "tcp", "portal", "0", True),
+            ("v3.2.0", "v3.2.1", "1", "tcp", "portal", "0", True),
+            ("v3.1.0", "v3.2.0", "0", "tcp", "portal", "0", True),
+            ("v3.1.0", "v3.2.0", "1", "none", "portal", "0", True),
+            ("v3.1.0", "v3.2.0", "1", "tcp", "egress", "0", True),
+        ):
+            with self.subTest(current=current, selected=selected, morph=morph, carrier=carrier, role=role):
+                result = self.shell('''ASSUME_YES=1
+NOWHERE_ROLE="$TEST_ROLE"; NOWHERE_MORPH="$TEST_MORPH"; NOWHERE_TCP_CARRIER="$TEST_CARRIER"
+ALLOW_PRELUDE_BREAKING_UPGRADE="$TEST_ALLOWED"
+confirm_prelude_upgrade "$TEST_CURRENT" "$TEST_SELECTED"
+''', env={"TEST_ROLE": role, "TEST_MORPH": morph, "TEST_CARRIER": carrier,
+          "TEST_ALLOWED": allowed, "TEST_CURRENT": current, "TEST_SELECTED": selected})
+                self.assertEqual(result.returncode == 0, success, result.stderr)
+
+    def test_upgrade_guard_runs_before_replacing_binary(self):
+        self.write_config(NOWHERE_VERSION_VALUE="v3.1.0", NOWHERE_MORPH_VALUE="1")
+        for action in ("update_all", "install_all"):
+            with self.subTest(action=action):
+                result = self.shell('''ASSUME_YES=1; VERSION_EXPLICIT=1; NOWHERE_VERSION=v3.2.0
+BIN_PATH=/usr/bin/true
+install_binary() { printf UNEXPECTED_REPLACEMENT; }
+''' + action)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--allow-prelude-breaking-upgrade", result.stderr)
+                self.assertNotIn("UNEXPECTED_REPLACEMENT", result.stdout)
+
     def test_dual_stack_override_replaces_saved_single_dial(self):
         self.write_config(NOWHERE_VERSION_VALUE="v3.0.0", NOWHERE_DIAL_VALUE="192.0.2.1")
         result = self.shell('''ASSUME_YES=1; NOWHERE_VERSION=v3.0.0

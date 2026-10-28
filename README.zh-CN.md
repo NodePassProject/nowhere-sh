@@ -7,8 +7,9 @@
 
 ## 支持范围
 
-脚本新装默认使用 `v3.0.0`。版本列表提供稳定版 NW3 Release，以及固定的
-NW2 LTS 基线 `v2.2.1`。升级时直接回车会选择当前协议线中最新的受支持版本。
+脚本新装默认使用 `v3.1.0`。版本列表提供 NW3 Release，以及固定的 NW2 LTS 基线
+`v2.2.1`。GitHub 预发布版本标注 `(pre)`，用户可通过编号选择安装；升级时直接回车
+会选择当前协议线中最新的正式版。
 脚本输出 Anywhere 的 `nowhere://` 链接和 Native Vector 的 `vector://` URL。现有稳定版
 NW2 安装仍可识别并升级，但 NW2 的新安装目标只提供 LTS 基线。
 
@@ -30,6 +31,7 @@ NW2 安装仍可识别并升级，但 NW2 的新安装目标只提供 LTS 基线
 ## 快速开始
 
 系统需要 Linux、systemd、`curl`、`tar`，支持 `x86_64` 与 `aarch64` VPS。
+版本选择器还需要 `python3` 或 `jq`，用于读取 GitHub Release 元数据。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
@@ -153,12 +155,16 @@ NW2 按 `v2.2.1` LTS 基线维护。Portal 和原生 `next` 密钥接受 32–64
 
 NW3 是默认协议线，默认开启 Morph。NW2 与 NW3 的 wire protocol 不兼容，切换协议线前
 需要协调升级客户端和服务端。脚本会在切换时要求明确确认；非交互更新需传入
-`--allow-protocol-breaking-upgrade`。NW3 协议线内的稳定 Release 可直接选择升级，不会
-触发跨协议线迁移确认。
+`--allow-protocol-breaking-upgrade`。NW3 协议线内不触发跨协议线迁移确认。
+但 Portal 从 `v3.2.0` 起强制要求 Morph TCP 认证前导；跨越此边界前，需要将原生 Vector
+升级至 `v3.1.0+`，并确认 Anywhere 或其他客户端已支持。受影响的安装、重装和升级会要求
+确认，非交互运行需传入 `--allow-prelude-breaking-upgrade`。QUIC 和未开启 Morph 的 TLS
+不受影响；共享密钥、证书和分享链接格式无需迁移。
 
-本机 Nowhere 的 TCP Morph 出站连接可通过 `--morph-tcp-prelude low7|full8` 设置前导模式，
-默认是 `full8`。该设置影响 NW2 原生 `next` 和 NW3 原生 TLS 连接，不会写入 Anywhere
-导入链接。
+本机 Nowhere 的 TCP Morph 出站连接可通过 `--morph-tcp-prelude fade|low7|full8` 设置前导模式。
+新建 NW3 `v3.0.1+` 配置默认使用 `fade`；NW2 LTS 和 NW3 `v3.0.0` 使用 `full8`，
+已有显式设置会保留。该设置影响 NW2 原生 `next` 和 NW3 原生 TLS 连接，不会写入 Anywhere
+导入链接。选择 `low7/full8` 不会关闭认证前导。
 
 ## 客户端链接
 

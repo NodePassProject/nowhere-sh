@@ -11,7 +11,7 @@ CONFIG_DIR="/etc/nowhere"
 CONFIG_FILE="${CONFIG_DIR}/nowhere.env"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
-DEFAULT_VERSION="v3.0.0"
+DEFAULT_VERSION="v3.1.0"
 NW2_LTS_VERSION="v2.2.1"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
@@ -35,6 +35,7 @@ VERSION_EXPLICIT=0
 KEY_EXPLICIT=0
 [[ ${NOWHERE_KEY+x} ]] && KEY_EXPLICIT=1
 ALLOW_PROTOCOL_BREAKING_UPGRADE=0
+ALLOW_PRELUDE_BREAKING_UPGRADE=0
 ROLE_EXPLICIT=0
 OUT_EXPLICIT=0
 PUBLIC_HOST_EXPLICIT=0
@@ -69,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --version) NOWHERE_VERSION="${2:?missing --version value}"; VERSION_EXPLICIT=1; shift 2 ;;
     --role) NOWHERE_ROLE="${2:?missing --role value}"; ROLE_EXPLICIT=1; shift 2 ;;
     --allow-protocol-breaking-upgrade) ALLOW_PROTOCOL_BREAKING_UPGRADE=1; shift ;;
+    --allow-prelude-breaking-upgrade) ALLOW_PRELUDE_BREAKING_UPGRADE=1; shift ;;
     --out) NOWHERE_OUT="${2:?missing --out value}"; OUT_EXPLICIT=1; shift 2 ;;
     --out-socks) NOWHERE_OUT_SOCKS="${2:?missing --out-socks value}"; shift 2 ;;
     --egress-portal-host) NOWHERE_EGRESS_PORTAL_HOST="${2:?missing --egress-portal-host value}"; shift 2 ;;
@@ -135,7 +137,7 @@ Usage:
   sudo bash nowhere-vps.sh install-vector [--yes] [options]
   sudo bash nowhere-vps.sh install-egress [--yes] [options]
   sudo bash nowhere-vps.sh configure [options]
-  sudo bash nowhere-vps.sh update [--version v3.0.0 or v2.2.1]
+  sudo bash nowhere-vps.sh update [--version v3.1.0 or v2.2.1]
   sudo bash nowhere-vps.sh update-script
   sudo bash nowhere-vps.sh versions
   sudo bash nowhere-vps.sh start|stop|restart|status|telemetry|logs|link|fingerprint|uninstall
@@ -149,7 +151,7 @@ New installs use NW3 by default. NW2 remains available at its v2.2.1 LTS baselin
 Options:
   --client anywhere|vector|both
   --lang zh|en                    Wizard and menu language
-  --version v3.0.0 or v2.2.1 (or another stable NW3 release)
+  --version v3.1.0 or v2.2.1 (or another listed NW3 release)
   --role portal|egress           NW3 service role
   --out direct|socks|egress      NW3 Portal target path
   --out-socks [user:pass@]host:port
@@ -158,6 +160,7 @@ Options:
   --egress-portal-udp-port 2077
   --egress-sni name|none --egress-pin sha256|none
   --allow-protocol-breaking-upgrade  Confirm NW2/NW3 cutover after coordinating peers
+  --allow-prelude-breaking-upgrade   Confirm Morph TCP clients support authenticated preludes
   --key secret
   --public-host host              Client-facing domain or IP
   --anywhere-sni name|none        NW2 SNI for Anywhere links
@@ -169,7 +172,7 @@ Options:
   --tls 1|2                       1=self-signed, 2=PEM certificate
   --crt /absolute/certificate.pem --tls-key /absolute/private.key
   --morph 0|1
-  --morph-tcp-prelude low7|full8    TCP Morph prelude for native TLS connections
+  --morph-tcp-prelude fade|low7|full8  fade requires NW3 v3.0.1+; existing settings are kept
   --rate 0 --etar 0 --dial auto|IP --log info
   --dial4 auto|IPv4 --dial6 auto|IPv6 (exclusive with --dial)
   --socks none|[user:pass@]host:port (NW2 Portal SOCKS5 upstream)
@@ -418,14 +421,45 @@ validate_installed_version() {
   major="${BASH_REMATCH[1]}"
   [[ "$major" == 2 || "$major" == 3 ]]
 }
-require_supported_version() { validate_release_version "$1" || die "Supported Nowhere releases are v${NW2_LTS_VERSION#v} (NW2 LTS) and stable NW3 releases."; }
+require_supported_version() { validate_release_version "$1" || die "Supported Nowhere releases are v${NW2_LTS_VERSION#v} (NW2 LTS) and NW3 releases with vMAJOR.MINOR.PATCH tags."; }
 require_supported_installed_version() { validate_installed_version "$1" || die "Only stable NW2 and NW3 installations are recognized."; }
 is_nw3_version() { [[ "$1" =~ ^v3\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; }
 require_deployable_version() {
   require_supported_version "$1"
   return 0
 }
-validate_morph_tcp_prelude() { [[ "$1" == low7 || "$1" == full8 ]]; }
+version_at_least() {
+  local version="${1#v}" minimum="${2#v}" major minor patch min_major min_minor min_patch
+  IFS=. read -r major minor patch <<<"$version"
+  IFS=. read -r min_major min_minor min_patch <<<"$minimum"
+  (( major > min_major || (major == min_major && minor > min_minor) ||
+    (major == min_major && minor == min_minor && patch >= min_patch) ))
+}
+default_morph_tcp_prelude() {
+  if is_nw3_version "$1" && version_at_least "$1" v3.0.1; then printf fade; else printf '%s' "$DEFAULT_MORPH_TCP_PRELUDE"; fi
+}
+validate_morph_tcp_prelude() {
+  [[ "$1" == low7 || "$1" == full8 ]] && return 0
+  [[ "$1" == fade ]] && is_nw3_version "$NOWHERE_VERSION" && version_at_least "$NOWHERE_VERSION" v3.0.1
+}
+confirm_prelude_upgrade() {
+  local current="$1" selected="$2" answer
+  is_nw3_version "$selected" && version_at_least "$selected" v3.2.0 || return 0
+  if is_nw3_version "$current" && version_at_least "$current" v3.2.0; then return 0; fi
+  [[ "${NOWHERE_ROLE:-${NOWHERE_ROLE_VALUE:-portal}}" == portal &&
+    "${NOWHERE_MORPH:-${NOWHERE_MORPH_VALUE:-1}}" == 1 &&
+    "${NOWHERE_TCP_CARRIER:-${NOWHERE_TCP_CARRIER_VALUE:-tcp}}" != none ]] || return 0
+  if is_chinese; then
+    warn "目标版本要求 Morph TCP 客户端支持认证前导。原生 Vector 需要 3.1.0+；请确认 Anywhere 已支持。"
+  else
+    warn "Morph TCP now requires authenticated preludes. Native Vector needs 3.1.0+; verify Anywhere support before upgrading."
+  fi
+  [[ "$ALLOW_PRELUDE_BREAKING_UPGRADE" -eq 0 ]] || return 0
+  [[ "$ASSUME_YES" -eq 0 && -t 0 ]] || die "Confirm compatible Morph TCP clients with --allow-prelude-breaking-upgrade."
+  if is_chinese; then read -r -p "确认客户端兼容后，输入 UPGRADE 继续: " answer
+  else read -r -p "After checking client compatibility, type UPGRADE: " answer; fi
+  [[ "$answer" == UPGRADE ]] || { warn "Update cancelled."; return 1; }
+}
 require_supported_nowhere() {
   local installed
   require_root
@@ -798,7 +832,7 @@ validate_nw3_config() {
   require_deployable_version "$NOWHERE_VERSION"
   validate_nw3_key "$NOWHERE_KEY" || die "NW3 shared keys must be exactly 32 lowercase hexadecimal characters."
   validate_bool "$NOWHERE_MORPH" || die "Morph must be 0 or 1."
-  validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "TCP Morph prelude must be low7 or full8."
+  validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "Invalid TCP Morph prelude. fade requires NW3 v3.0.1+."
   validate_profile "$NOWHERE_TRANSPORT_MEMORY_PROFILE" || die "Invalid transport memory profile."
   validate_nonnegative_int "$NOWHERE_RATE" && validate_nonnegative_int "$NOWHERE_ETAR" || die "Rate limits must be non-negative integers."
   validate_dial_settings || die "Invalid outbound source binding; dial is exclusive with dial4/dial6."
@@ -958,7 +992,7 @@ configure_nw3_values() {
   NOWHERE_TCP_CARRIER="${NOWHERE_TCP_CARRIER:-none}"; NOWHERE_TCP_PORT="${NOWHERE_TCP_PORT:-$DEFAULT_PORT}"
   NOWHERE_UDP_CARRIER="${NOWHERE_UDP_CARRIER:-none}"; NOWHERE_UDP_PORT="${NOWHERE_UDP_PORT:-$DEFAULT_PORT}"
   NOWHERE_TLS="${NOWHERE_TLS:-$DEFAULT_TLS}"; NOWHERE_CRT="${NOWHERE_CRT:-}"; NOWHERE_TLS_KEY="${NOWHERE_TLS_KEY:-}"
-  NOWHERE_MORPH_TCP_PRELUDE="${NOWHERE_MORPH_TCP_PRELUDE:-${NOWHERE_MORPH_TCP_PRELUDE_VALUE:-${NOW_MORPH_TCP_PRELUDE:-$DEFAULT_MORPH_TCP_PRELUDE}}}"
+  NOWHERE_MORPH_TCP_PRELUDE="${NOWHERE_MORPH_TCP_PRELUDE:-${NOWHERE_MORPH_TCP_PRELUDE_VALUE:-${NOW_MORPH_TCP_PRELUDE:-$(default_morph_tcp_prelude "$NOWHERE_VERSION")}}}"
   NOWHERE_SOCKS="${NOWHERE_SOCKS:-${NOWHERE_OUT_SOCKS:-none}}"
   NOWHERE_NEXT="${NOWHERE_NEXT:-none}"; NOWHERE_NEXT_UP="${NOWHERE_NEXT_UP:-tcp}"; NOWHERE_NEXT_DOWN="${NOWHERE_NEXT_DOWN:-tcp}"
   NOWHERE_NEXT_MUX="${NOWHERE_NEXT_MUX:-$DEFAULT_MUX}"; NOWHERE_NEXT_SNI="${NOWHERE_NEXT_SNI:-$DEFAULT_SNI}"; NOWHERE_NEXT_PIN="${NOWHERE_NEXT_PIN:-$DEFAULT_PIN}"
@@ -982,7 +1016,7 @@ configure_nw3_values() {
       NOWHERE_TLS="$(prompt_value "TLS 1=self-signed, 2=PEM" "TLS 1=自签证书，2=PEM 证书" "$NOWHERE_TLS")"
       if [[ "$NOWHERE_TLS" == 2 ]]; then NOWHERE_CRT="$(prompt_value "Certificate chain absolute path" "证书链绝对路径" "$NOWHERE_CRT")"; NOWHERE_TLS_KEY="$(prompt_value "Private key absolute path" "私钥绝对路径" "$NOWHERE_TLS_KEY")"; fi
       NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
-      [[ "$NOWHERE_MORPH" != 1 ]] || NOWHERE_MORPH_TCP_PRELUDE="$(prompt_value "TCP Morph prelude low7/full8" "TCP Morph 前导 low7/full8" "$NOWHERE_MORPH_TCP_PRELUDE")"
+      [[ "$NOWHERE_MORPH" != 1 ]] || NOWHERE_MORPH_TCP_PRELUDE="$(prompt_value "TCP Morph prelude fade/low7/full8 (fade: 3.0.1+)" "TCP Morph 前导 fade/low7/full8（fade: 3.0.1+）" "$NOWHERE_MORPH_TCP_PRELUDE")"
       NOWHERE_RATE="$(prompt_value "Rate Mbps, 0=unlimited" "限速 Mbps，0=不限速" "$NOWHERE_RATE")"
       NOWHERE_ETAR="$(prompt_value "Etar Mbps, 0=unlimited" "Etar Mbps，0=不限速" "$NOWHERE_ETAR")"
       NOWHERE_OUT="$(prompt_value "Portal out direct/socks/egress" "Portal 出口 direct/socks/egress" "$NOWHERE_OUT")"
@@ -1300,22 +1334,44 @@ prompt_remote_fingerprint() {
   run_remote_fingerprint
 }
 
-fetch_recent_releases() { curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${REPO}/releases?per_page=100" | sed -nE 's/^[[:space:]]*"tag_name":[[:space:]]*"([^"]+)".*/\1/p'; }
+parse_release_metadata() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys
+for release in json.load(sys.stdin):
+    if not release.get("draft", False):
+        print(release["tag_name"] + "\t" + ("true" if release.get("prerelease", False) else "false"))'
+  elif command -v jq >/dev/null 2>&1; then
+    jq -r '.[] | select(.draft != true) | [.tag_name, (.prerelease | tostring)] | @tsv'
+  else
+    die "The release picker requires python3 or jq to read GitHub release metadata."
+  fi
+}
+fetch_recent_releases() {
+  curl -fsSL --retry 3 --connect-timeout 10 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${REPO}/releases?per_page=100" | parse_release_metadata
+}
 choose_release_version() {
-  local preferred="${1:-}" releases=() item index choice default_index=1 nw3_count=0
-  while IFS= read -r item; do
+  local preferred="${1:-}" releases=() prereleases=() metadata item pre index choice default_index=0 nw3_count=0 label
+  metadata="$(fetch_recent_releases)" || { warn "Cannot fetch release metadata. Retry or use --version with install/update."; return 1; }
+  while IFS=$'\t' read -r item pre; do
     if validate_release_version "$item" && is_nw3_version "$item" && (( nw3_count < 10 )); then
-      releases+=("$item"); nw3_count=$((nw3_count + 1))
+      releases+=("$item"); prereleases+=("${pre:-false}"); nw3_count=$((nw3_count + 1))
+      if [[ "${pre:-false}" != true && "$default_index" -eq 0 ]]; then default_index="$nw3_count"; fi
     fi
-  done < <(fetch_recent_releases)
+  done <<<"$metadata"
   releases+=("$NW2_LTS_VERSION")
-  [[ ${#releases[@]} -gt 0 ]] || die "No supported release found on GitHub."
+  prereleases+=(false)
+  [[ "$default_index" -ne 0 ]] || default_index="${#releases[@]}"
   if [[ -n "$preferred" ]]; then
     for index in "${!releases[@]}"; do [[ "${releases[$index]}" != "$preferred" ]] || default_index="$((index + 1))"; done
   fi
   echo
   is_chinese && echo "可用的 Nowhere Release（NW2 LTS / NW3）：" || echo "Available Nowhere releases (NW2 LTS / NW3):"
-  for index in "${!releases[@]}"; do printf ' %2d) %s\n' "$((index + 1))" "${releases[$index]}"; done
+  for index in "${!releases[@]}"; do
+    label="${releases[$index]}"
+    [[ "${prereleases[$index]}" != true ]] || label="${label} (pre)"
+    printf ' %2d) %s\n' "$((index + 1))" "$label"
+  done
   is_chinese && echo "  0) 取消" || echo "  0) Cancel"
   while true; do
     if is_chinese; then read -r -p "请选择版本 [${default_index}]: " choice; else read -r -p "Choose a version [${default_index}]: " choice; fi
@@ -1333,6 +1389,7 @@ install_all() {
     confirm_protocol_upgrade "$NOWHERE_VERSION_VALUE" "${NOWHERE_VERSION:-$NOWHERE_VERSION_VALUE}" || return 1
   fi
   configure_values || return 1
+  confirm_prelude_upgrade "${NOWHERE_VERSION_VALUE:-}" "$NOWHERE_VERSION" || return 1
   if [[ "$NOWHERE_ROLE" == egress ]] && ! is_nw3_version "$NOWHERE_VERSION"; then die "Egress is available only in NW3."; fi
   install_binary "$NOWHERE_VERSION"; save_config; write_service; systemctl enable "$SERVICE_NAME"; systemctl restart "$SERVICE_NAME"
   info "Nowhere service enabled and started."; print_links; print_tls_fingerprint || true
@@ -1380,11 +1437,13 @@ update_all() {
       NOWHERE_ROLE=portal
     fi
     configure_values || return 1
+    confirm_prelude_upgrade "$current" "$selected" || return 1
     install_binary "$selected"
     save_config
     write_service
     systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
   else
+  confirm_prelude_upgrade "$current" "$selected" || return 1
   NOWHERE_VERSION="$selected"
   NOWHERE_KEY="${NOWHERE_KEY_VALUE:-}"
   NOWHERE_NEXT="${NOWHERE_NEXT_VALUE:-none}"
