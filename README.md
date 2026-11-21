@@ -18,7 +18,7 @@ upgrade, while only the LTS baseline is offered as an NW2 install target.
 ## Features
 
 - Interactive wizard: press Enter at every prompt for sensible defaults.
-- Downloads a selected release and manages one systemd service as an NW2/NW3
+- Downloads a selected release and manages one systemd or OpenRC service as an NW2/NW3
   Portal or an NW3 Egress.
 - Endpoint forms: shared TCP/UDP port, independent ports, TCP-only,
   UDP-only, and `tcp4`/`tcp6`/`udp4`/`udp6` address-family restrictions.
@@ -34,14 +34,39 @@ upgrade, while only the LTS baseline is offered as an NW2 install target.
 
 ## Quick Start
 
-Requirements: Linux, systemd, `curl`, `tar`, and an `x86_64` or `aarch64` VPS.
-The release picker additionally needs `python3` or `jq` to read GitHub metadata.
+Requirements: Linux with systemd or Alpine with OpenRC, Bash, `curl`, `tar`,
+and an `x86_64` or `aarch64` VPS. Python is not required. Without `jq`,
+the picker shows built-in versions; use `--version` to select another release.
+Install `jq` to see the live GitHub release list.
+
+The install wizard offers `jq` and, for Anywhere links, `qrencode` separately.
+Press Enter to install each missing tool, or answer `n` to skip it. Quick
+install and `--yes` accept the defaults; add `--skip-jq --skip-qrencode` for
+a minimal unattended install. Showing links never installs packages.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
 chmod +x nowhere-vps.sh
 sudo bash nowhere-vps.sh
 ```
+
+### Alpine and Low-Memory LXC
+
+On an Alpine VPS or LXC booted with OpenRC, run as root:
+
+```bash
+apk add --no-cache bash curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
+bash nowhere-vps.sh
+```
+
+The script uses Alpine's BusyBox utilities and installs the musl build. New
+OpenRC configurations default to the `memory` transport profile; upgrades
+preserve the saved profile. For an existing installation, select `memory` in
+the configuration wizard or pass `configure --transport-memory-profile memory`.
+On Alpine the QR tool is packaged as `libqrencode-tools` in the community
+repository. Skipping it still produces text import links. The memory profile
+is not a hard RAM limit; actual usage depends on traffic and concurrent connections.
 
 On the first interactive run, choose English or Simplified Chinese. The choice
 is saved and can later be changed from menu item `21`, or selected explicitly
@@ -72,7 +97,7 @@ failures are ignored. The check never installs updates or changes the service.
 10) Restart service
 11) Show Nowhere instance status
 12) Probe TCP connectivity
-13) Show systemd service status
+13) Show service status
 14) Open Terminal UI (NW2 only)
 15) Follow logs
 16) Print client links / QR code
@@ -294,7 +319,7 @@ script** option or `update-script` command. Exit and rerun the script after the
 download to load the new menu. Script updates preserve the saved configuration,
 keys and running service; upgrading the Nowhere binary is a separate action.
 
-`status` reports the systemd service state; `telemetry` runs Nowhere's local
+`status` reports the service state; `telemetry` runs Nowhere's local
 read-only instance snapshot. `probe` builds a temporary Vector URL from the
 saved server settings and tests one TCP Flow to the requested target without
 printing the shared key or sending application payload. All three commands are
@@ -307,6 +332,10 @@ available on the NW2 LTS baseline and NW3.
 /etc/nowhere/nowhere.env
 /etc/systemd/system/nowhere.service
 ```
+
+On OpenRC, the service file is `/etc/init.d/nowhere`. The helper at
+`/etc/nowhere/run` replaces `/etc/nowhere/nowhere.log` each time the process
+starts. Use the `logs` command to follow the current log.
 
 Uninstalling keeps `/etc/nowhere` so configuration and keys are not removed by
 accident.

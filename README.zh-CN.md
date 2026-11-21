@@ -16,13 +16,13 @@ NW2 安装仍可识别并升级，但 NW2 的新安装目标只提供 LTS 基线
 ## 功能
 
 - 交互式向导，每一项均有默认值，连续回车即可完成部署。
-- 下载指定受支持 Release，并通过一个 systemd 服务管理 NW2/NW3 Portal 或 NW3 Egress。
+- 下载指定受支持 Release，并通过 systemd 或 OpenRC 管理 NW2/NW3 Portal 或 NW3 Egress。
 - 支持共享/独立 TCP、UDP 端口，TCP-only、UDP-only，以及
   `tcp4`、`tcp6`、`udp4`、`udp6` 地址族限制。
 - NW2 LTS 按 `v2.2.1` 存量基线管理，支持 SOCKS5、原生 `next`、Mux、SNI、
   证书 Pin、Morph 与双栈出站源地址绑定。
 - NW3 Portal 支持直连、SOCKS5、Egress 出口、32 位共享密钥和 Morph；NW3
-  Egress 可作为独立 systemd 服务部署。
+  Egress 可作为独立服务部署。
 - 支持 Anywhere 和 Native Vector 链接；输出 Anywhere TCP/UDP 导入链接及二维码，
   并在可用时为 Native Vector 自动添加自签证书 Pin。
 - 提供共享密钥生成、远端证书指纹查询、日志、服务启停、实例状态和 TCP Flow 探测。
@@ -30,14 +30,35 @@ NW2 安装仍可识别并升级，但 NW2 的新安装目标只提供 LTS 基线
 
 ## 快速开始
 
-系统需要 Linux、systemd、`curl`、`tar`，支持 `x86_64` 与 `aarch64` VPS。
-版本选择器还需要 `python3` 或 `jq`，用于读取 GitHub Release 元数据。
+支持使用 systemd 的 Linux 和使用 OpenRC 的 Alpine，需 Bash、`curl`、`tar`，
+支持 `x86_64` 与 `aarch64`。不需要 Python。没有 `jq` 时版本菜单只显示内置版本，
+也可以用 `--version` 指定其他版本；装上 `jq` 后即可查看 GitHub 的实时版本列表。
+
+安装向导会分别询问是否安装 `jq` 和二维码工具（仅 Anywhere 链接）。缺少工具时，
+直接回车默认安装，输入 `n` 跳过。快速安装和 `--yes` 会接受默认值；精简无人值守安装
+可加 `--skip-jq --skip-qrencode`。查看链接时不会自动安装依赖。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
 chmod +x nowhere-vps.sh
 sudo bash nowhere-vps.sh
 ```
+
+### Alpine 与小内存 LXC
+
+在已用 OpenRC 启动的 Alpine VPS 或 LXC 中，以 root 执行：
+
+```bash
+apk add --no-cache bash curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh -o nowhere-vps.sh
+bash nowhere-vps.sh
+```
+
+脚本使用 Alpine 自带的 BusyBox 工具并下载 musl 版二进制。OpenRC 新装默认使用
+`memory` 传输内存档，升级保留原设置；已有安装可在配置向导选 `memory`，也可传
+`configure --transport-memory-profile memory`。Alpine 的二维码工具由 community 仓库
+的 `libqrencode-tools` 提供；跳过仍可获得文本导入链接。`memory` 档不是内存上限，
+实际用量随流量和并发连接数变化。
 
 首次交互运行时可选择 English 或简体中文，选择会保存下来；之后可在菜单第 `21`
 项切换，也可用 `--lang en` 或 `--lang zh` 显式指定语言。
@@ -64,7 +85,7 @@ sudo bash nowhere-vps.sh
 10) 重启服务
 11) 查看 Nowhere 实例状态
 12) 测试 TCP 连通性
-13) 查看 systemd 服务状态
+13) 查看服务状态
 14) 打开终端界面（仅 NW2）
 15) 查看实时日志
 16) 打印客户端链接 / 二维码
@@ -264,7 +285,7 @@ bash nowhere-vps.sh --help
 退出并重新运行脚本以加载新菜单。更新脚本会保留已保存的配置、密钥和正在运行的服务，
 不会自动升级 Nowhere 二进制；二进制升级需要单独选择。
 
-`status` 查看 systemd 服务状态；`telemetry` 调用 Nowhere 的只读实例状态快照。
+`status` 查看服务状态；`telemetry` 调用 Nowhere 的只读实例状态快照。
 `probe` 会根据已保存的服务配置临时生成 Vector URL，测试到目标地址的一次 TCP
 Flow，不会显示共享密钥，也不会发送应用数据。NW2 LTS 基线和 NW3 均支持这些命令。
 
@@ -275,5 +296,8 @@ Flow，不会显示共享密钥，也不会发送应用数据。NW2 LTS 基线�
 /etc/nowhere/nowhere.env
 /etc/systemd/system/nowhere.service
 ```
+
+OpenRC 的服务文件是 `/etc/init.d/nowhere`；启动辅助脚本为 `/etc/nowhere/run`。
+每次进程启动都会覆盖 `/etc/nowhere/nowhere.log`，可通过 `logs` 命令跟踪当前日志。
 
 卸载会保留 `/etc/nowhere`，避免误删配置与 Shared Key。

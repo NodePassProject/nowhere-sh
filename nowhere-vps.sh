@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="NodePassProject/Nowhere"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh"
-SCRIPT_VERSION="2026.10.28"
+SCRIPT_VERSION="2026.11.21"
 SCRIPT_UPDATE_AVAILABLE_VERSION=""
 SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || printf '%s' "$SCRIPT_PATH")"; fi
@@ -12,6 +12,11 @@ BIN_PATH="/usr/local/bin/nowhere"
 CONFIG_DIR="/etc/nowhere"
 CONFIG_FILE="${CONFIG_DIR}/nowhere.env"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+SERVICE_BACKEND=systemd
+if [[ -f /etc/alpine-release ]] || { [[ ! -d /run/systemd/system ]] && command -v rc-service >/dev/null 2>&1; }; then
+  SERVICE_BACKEND=openrc
+  SERVICE_FILE="/etc/init.d/${SERVICE_NAME}"
+fi
 
 DEFAULT_VERSION="v3.1.0"
 NW2_LTS_VERSION="v2.2.1"
@@ -25,6 +30,7 @@ DEFAULT_MORPH="0"
 DEFAULT_MORPH_TCP_PRELUDE="full8"
 DEFAULT_MUX="0"
 DEFAULT_TRANSPORT_MEMORY_PROFILE="throughput"
+[[ "$SERVICE_BACKEND" != openrc ]] || DEFAULT_TRANSPORT_MEMORY_PROFILE=memory
 DEFAULT_MIX_FALLBACK_TIMEOUT="1s"
 DEFAULT_SOCKS="none"
 DEFAULT_VECTOR_SOCKS="127.0.0.1:1080"
@@ -33,6 +39,8 @@ DEFAULT_PIN="none"
 DEFAULT_TELEMETRY_INTERVAL="1s"
 
 ASSUME_YES=0
+SKIP_JQ=0
+SKIP_QRENCODE=0
 VERSION_EXPLICIT=0
 KEY_EXPLICIT=0
 [[ ${NOWHERE_KEY+x} ]] && KEY_EXPLICIT=1
@@ -68,6 +76,8 @@ if [[ "$ACTION" == fingerprint && $# -gt 0 && "$1" != -* ]]; then FINGERPRINT_UR
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes) ASSUME_YES=1; shift ;;
+    --skip-jq) SKIP_JQ=1; shift ;;
+    --skip-qrencode) SKIP_QRENCODE=1; shift ;;
     --lang) NOWHERE_LANG="${2:?missing --lang value}"; shift 2 ;;
     --version) NOWHERE_VERSION="${2:?missing --version value}"; VERSION_EXPLICIT=1; shift 2 ;;
     --role) NOWHERE_ROLE="${2:?missing --role value}"; ROLE_EXPLICIT=1; shift 2 ;;
@@ -153,6 +163,8 @@ New installs use NW3 by default. NW2 remains available at its v2.2.1 LTS baselin
 Options:
   --client anywhere|vector|both
   --lang zh|en                    Wizard and menu language
+  --skip-jq                      Do not install the optional release-list tool
+  --skip-qrencode                Do not install the optional QR code tool
   --version v3.1.0 or v2.2.1 (or another listed NW3 release)
   --role portal|egress           NW3 service role
   --out direct|socks|egress      NW3 Portal target path
@@ -193,7 +205,13 @@ EOF
 }
 
 require_root() { [[ "$(id -u)" -eq 0 ]] || die "Please run as root: sudo bash $0 ${ACTION}"; }
-require_systemd() {
+require_service_manager() {
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    command -v rc-service >/dev/null && command -v rc-update >/dev/null &&
+      command -v supervise-daemon >/dev/null || die "OpenRC is required. Use an Alpine VPS or LXC booted with OpenRC."
+    [[ -f /run/openrc/softlevel ]] || die "OpenRC is not running. Boot the Alpine VPS or LXC with OpenRC first."
+    return
+  fi
   command -v systemctl >/dev/null 2>&1 || die "systemctl is required."
   [[ -d /run/systemd/system ]] || warn "systemd does not appear to be running; service commands may fail."
 }
@@ -235,16 +253,14 @@ env_quote() {
   printf '"%s"' "$value"
 }
 urlencode() {
-  local input="${1:-}"
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$input"
-  elif command -v python >/dev/null 2>&1; then
-    python -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$input"
-  elif [[ "$input" =~ ^[A-Za-z0-9._~-]*$ ]]; then
-    printf '%s\n' "$input"
-  else
-    die "python3 is required to percent-encode this value."
-  fi
+  local LC_ALL=C input="${1:-}" i byte code
+  for ((i = 0; i < ${#input}; i++)); do
+    byte="${input:i:1}"
+    case "$byte" in
+      [a-zA-Z0-9._~-]) printf '%s' "$byte" ;;
+      *) printf -v code '%d' "'$byte"; printf '%%%02X' "$((code & 255))" ;;
+    esac
+  done
 }
 format_host_for_url() {
   local host="${1:-}"
@@ -254,7 +270,7 @@ format_host_for_url() {
   printf '%s' "$host"
 }
 strip_brackets() { local host="${1:-}"; host="${host#[}"; printf '%s' "${host%]}"; }
-random_token() { openssl rand -hex 16; }
+random_token() { od -An -v -N16 -tx1 /dev/urandom | tr -d '[:space:]'; }
 detect_public_host() {
   local host=""
   command -v curl >/dev/null 2>&1 && host="$(curl -4fsS --max-time 4 https://api.ipify.org 2>/dev/null || true)"
@@ -271,7 +287,7 @@ confirm_default_yes() {
   local answer
   [[ "$ASSUME_YES" -eq 1 ]] && return 0
   [[ -t 0 ]] || return 1
-  read -r -p "$1 [Y/n]: " answer
+  read -r -p "$1 [Y/n]: " answer || return 1
   [[ -z "$answer" || "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]
 }
 
@@ -1132,18 +1148,54 @@ EOF
 detect_asset() {
   local arch libc=gnu
   case "$(uname -m)" in x86_64|amd64) arch=x86_64 ;; aarch64|arm64) arch=aarch64 ;; *) die "Unsupported architecture: $(uname -m)" ;; esac
-  command -v ldd >/dev/null 2>&1 && ldd --version 2>&1 | grep -qi musl && libc=musl
+  if [[ -f /etc/alpine-release ]] || compgen -G '/lib/ld-musl-*.so.1' >/dev/null; then
+    libc=musl
+  fi
   printf 'nowhere-%s-unknown-linux-%s.tar.gz' "$arch" "$libc"
 }
-install_binary() {
-  local version="$1" asset url tmpdir binary
+install_binary() (
+  local version="$1" asset url binary
   require_deployable_version "$version"; command -v curl >/dev/null 2>&1 || die "curl is required."; command -v tar >/dev/null 2>&1 || die "tar is required."
-  asset="$(detect_asset)"; url="https://github.com/${REPO}/releases/download/${version}/${asset}"; tmpdir="$(mktemp -d)"; trap 'rm -rf "${tmpdir:-}"' RETURN
-  info "Downloading ${asset} from ${REPO} ${version}..."; curl -fL --retry 3 --connect-timeout 10 -o "${tmpdir}/${asset}" "$url"; tar -xzf "${tmpdir}/${asset}" -C "$tmpdir"
-  binary="$(find "$tmpdir" -type f -name nowhere -perm -u+x | head -n 1)"; [[ -n "$binary" ]] || binary="$(find "$tmpdir" -type f -name nowhere | head -n 1)"; [[ -n "$binary" ]] || die "Nowhere binary not found in release archive."
-  install -m 755 "$binary" "$BIN_PATH"; rm -rf "$tmpdir"; trap - RETURN
+  asset="$(detect_asset)"; url="https://github.com/${REPO}/releases/download/${version}/${asset}"; tmpdir="$(mktemp -d)"; trap 'rm -rf "$tmpdir"' EXIT
+  info "Downloading ${asset} from ${REPO} ${version}..."
+  curl -fL --retry 3 --connect-timeout 10 -o "${tmpdir}/${asset}" "$url" || return 1
+  tar -xzf "${tmpdir}/${asset}" -C "$tmpdir" || return 1
+  binary="$(find "$tmpdir" -type f -name nowhere -print -quit)"; [[ -n "$binary" ]] || die "Nowhere binary not found in release archive."
+  mkdir -p "${BIN_PATH%/*}" && install -m 755 "$binary" "$BIN_PATH"
+)
+service_log_path() { printf '%s/nowhere.log' "$CONFIG_DIR"; }
+write_openrc_service() {
+  cat >"${CONFIG_DIR}/run" <<EOF
+#!/bin/sh
+set -e
+umask 077
+exec >"$(service_log_path)" 2>&1
+set -a
+. "$CONFIG_FILE"
+set +a
+exec "$BIN_PATH" "\${NOWHERE_SERVICE_URL:-\${NOWHERE_PORTAL:?Missing Nowhere URL}}"
+EOF
+  chmod 700 "${CONFIG_DIR}/run"
+  cat >"$SERVICE_FILE" <<EOF
+#!/sbin/openrc-run
+description="Nowhere"
+supervisor=supervise-daemon
+command="${CONFIG_DIR}/run"
+respawn_delay=3
+respawn_max=5
+respawn_period=60
+
+depend() {
+  use net
+}
+EOF
+  chmod 755 "$SERVICE_FILE"
 }
 write_service() {
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    write_openrc_service
+    return
+  fi
   cat >"$SERVICE_FILE" <<EOF
 [Unit]
 Description=Nowhere ${NOWHERE_ROLE:-portal}
@@ -1170,7 +1222,45 @@ WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
 }
-service_cmd() { require_root; require_systemd; systemctl "$1" "$SERVICE_NAME"; }
+service_control() {
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    case "$1" in
+      enable) rc-update add "$SERVICE_NAME" default ;;
+      disable) rc-update del "$SERVICE_NAME" default ;;
+      is-enabled) [[ -L "/etc/runlevels/default/$SERVICE_NAME" ]] ;;
+      is-active) rc-service "$SERVICE_NAME" status >/dev/null 2>&1 ;;
+      *) rc-service "$SERVICE_NAME" "$1" ;;
+    esac
+  else
+    systemctl "$1" "$SERVICE_NAME"
+  fi
+}
+service_state() {
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    local status=0
+    rc-service "$SERVICE_NAME" status >/dev/null 2>&1 || status=$?
+    case "$status" in 0) echo active ;; 3) echo inactive ;; *) echo failed ;; esac
+  else
+    service_control is-active
+  fi
+}
+service_logs() {
+  require_root
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    [[ -f "$(service_log_path)" ]] || die "No Nowhere log yet. Start the service first."
+    tail -n 100 -F "$(service_log_path)"
+  else
+    journalctl -u "$SERVICE_NAME" -f
+  fi
+}
+service_cmd() { require_root; require_service_manager; service_control "$1"; }
+service_activate() {
+  if [[ "$SERVICE_BACKEND" == openrc ]] && ! service_control is-active; then
+    service_control start
+  else
+    service_control restart
+  fi
+}
 run_nowhere_status() {
   require_supported_nowhere
   "$BIN_PATH" status
@@ -1190,15 +1280,38 @@ run_probe() {
   "$BIN_PATH" probe "$vector_url" "$target"
 }
 
-install_qrencode() {
-  command -v qrencode >/dev/null 2>&1 && return 0
-  if command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq qrencode
-  elif command -v dnf >/dev/null 2>&1; then dnf install -y qrencode
-  elif command -v yum >/dev/null 2>&1; then yum install -y qrencode
-  elif command -v apk >/dev/null 2>&1; then apk add --no-cache qrencode
-  else warn "qrencode is unavailable; QR output skipped."; return 1; fi
+install_optional_package() {
+  local package="$1"
+  if command -v apk >/dev/null 2>&1; then
+    [[ "$package" != qrencode ]] || package=libqrencode-tools
+    apk add --no-cache "$package"
+  elif command -v apt-get >/dev/null 2>&1; then
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq &&
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$package"
+  elif command -v dnf >/dev/null 2>&1; then dnf install -y "$package"
+  elif command -v yum >/dev/null 2>&1; then yum install -y "$package"
+  else return 1; fi
 }
-print_qr_code() { [[ -n "$1" ]] || return; install_qrencode || return; echo; echo "QR code (Anywhere nowhere:// link):"; qrencode -t ANSIUTF8 -m 1 -s 1 "$1" || warn "QR rendering failed."; }
+offer_optional_tool() {
+  local tool="$1" skip="$2" prompt="$3"
+  if [[ "$skip" -eq 1 ]] || command -v "$tool" >/dev/null 2>&1; then return 0; fi
+  confirm_default_yes "$prompt" || return 0
+  if ! install_optional_package "$tool" || ! command -v "$tool" >/dev/null 2>&1; then
+    if is_chinese; then warn "可选工具 $tool 未安装，继续部署 Nowhere。"
+    else warn "Optional tool $tool was not installed; continuing without it."; fi
+  fi
+}
+offer_jq() {
+  local prompt="Install jq for the live GitHub release list?"
+  if is_chinese; then prompt="安装 jq 以查看 GitHub 实时版本列表？"; fi
+  offer_optional_tool jq "$SKIP_JQ" "$prompt"
+}
+offer_qrencode() {
+  local prompt="Install qrencode for Anywhere QR codes?"
+  if is_chinese; then prompt="安装二维码工具以输出 Anywhere 导入二维码？"; fi
+  offer_optional_tool qrencode "$SKIP_QRENCODE" "$prompt"
+}
+print_qr_code() { [[ -n "$1" ]] && command -v qrencode >/dev/null 2>&1 || return 0; echo; echo "QR code (Anywhere nowhere:// link):"; qrencode -t ANSIUTF8 -m 1 -s 1 "$1" || warn "QR rendering failed."; }
 
 print_links() {
   require_root; load_config; [[ -n "${NOWHERE_KEY_VALUE:-}" ]] || die "No configuration found."
@@ -1266,17 +1379,24 @@ local_tls_probe_host() {
   fi
 }
 print_tls_fingerprint_from_logs() {
+  recent_service_logs |
+    sed -nE 's/.*CERT_SHA256\|([A-Fa-f0-9]{64}).*/\1/p; s/.*TLS certificate SHA-256 fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p; s/.*tls certificate fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p' |
+    tail -n 1
+}
+recent_service_logs() {
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    tail -n 300 "$(service_log_path)" 2>/dev/null
+    return
+  fi
   command -v journalctl >/dev/null 2>&1 || return 1
   local invocation journal_args=(-u "$SERVICE_NAME" -n 300 --no-pager)
   invocation="$(systemctl show "$SERVICE_NAME" --property=InvocationID --value 2>/dev/null || true)"
   [[ ! "$invocation" =~ ^[0-9a-fA-F]{32}$ ]] || journal_args+=("_SYSTEMD_INVOCATION_ID=$invocation")
-  journalctl "${journal_args[@]}" 2>/dev/null |
-    sed -nE 's/.*CERT_SHA256\|([A-Fa-f0-9]{64}).*/\1/p; s/.*TLS certificate SHA-256 fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p; s/.*tls certificate fingerprint:[[:space:]]*([A-Fa-f0-9]{64}).*/\1/p' |
-    tail -n 1
+  journalctl "${journal_args[@]}" 2>/dev/null
 }
 current_local_tls_fingerprint() {
   local fingerprint output host port morph version tcp_carrier key endpoint url alpn=nw2
-  command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$SERVICE_NAME" || return 1
+  service_control is-active >/dev/null 2>&1 || return 1
   morph="${NOWHERE_MORPH_VALUE:-${NOWHERE_MORPH:-$DEFAULT_MORPH}}"
   version="${NOWHERE_VERSION_VALUE:-${NOWHERE_VERSION:-$NW2_LTS_VERSION}}"
   is_nw3_version "$version" && alpn=nw3
@@ -1319,7 +1439,7 @@ print_tls_fingerprint() {
   fi
   fingerprint="$(current_local_tls_fingerprint || true)"
   [[ -n "$fingerprint" ]] && { echo "Certificate SHA-256:"; echo "  ${fingerprint}"; return; }
-  warn "Fingerprint unavailable. Check: journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
+  warn "Fingerprint unavailable. Check the Logs menu or run this script with the logs command."
 }
 run_generate_key() {
   require_supported_nowhere
@@ -1337,16 +1457,7 @@ prompt_remote_fingerprint() {
 }
 
 parse_release_metadata() {
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -c 'import json,sys
-for release in json.load(sys.stdin):
-    if not release.get("draft", False):
-        print(release["tag_name"] + "\t" + ("true" if release.get("prerelease", False) else "false"))'
-  elif command -v jq >/dev/null 2>&1; then
-    jq -r '.[] | select(.draft != true) | [.tag_name, (.prerelease | tostring)] | @tsv'
-  else
-    die "The release picker requires python3 or jq to read GitHub release metadata."
-  fi
+  jq -r '.[] | select(.draft != true) | [.tag_name, (.prerelease // false | tostring)] | @tsv'
 }
 fetch_recent_releases() {
   curl -fsSL --retry 3 --connect-timeout 10 -H 'Accept: application/vnd.github+json' \
@@ -1354,7 +1465,16 @@ fetch_recent_releases() {
 }
 choose_release_version() {
   local preferred="${1:-}" releases=() prereleases=() metadata item pre index choice default_index=0 nw3_count=0 label
-  metadata="$(fetch_recent_releases)" || { warn "Cannot fetch release metadata. Retry or use --version with install/update."; return 1; }
+  if command -v jq >/dev/null 2>&1; then
+    metadata="$(fetch_recent_releases)" || { warn "Cannot fetch release metadata. Retry or use --version with install/update."; return 1; }
+  else
+    if is_chinese; then warn "未安装 jq，仅显示内置版本；安装 jq 后可查看远程 Release。"
+    else warn "jq is not installed; showing bundled versions only. Install jq to list remote releases."; fi
+    metadata="$(printf '%s\tfalse\n' "$DEFAULT_VERSION")"
+    if validate_release_version "$preferred" && is_nw3_version "$preferred" && [[ "$preferred" != "$DEFAULT_VERSION" ]]; then
+      metadata+=$'\n'"$(printf '%s\tfalse' "$preferred")"
+    fi
+  fi
   while IFS=$'\t' read -r item pre; do
     if validate_release_version "$item" && is_nw3_version "$item" && (( nw3_count < 10 )); then
       releases+=("$item"); prereleases+=("${pre:-false}"); nw3_count=$((nw3_count + 1))
@@ -1384,8 +1504,16 @@ choose_release_version() {
   done
 }
 
+install_selected_release() {
+  require_root; require_service_manager; load_config; resolve_language
+  local jq_offered=1
+  offer_jq
+  choose_release_version || return 1
+  NOWHERE_VERSION="$SELECTED_VERSION"
+  install_all
+}
 install_all() {
-  require_root; require_systemd; load_config
+  require_root; require_service_manager; load_config
   if [[ -x "$BIN_PATH" && -n "${NOWHERE_VERSION_VALUE:-}" ]]; then
     require_supported_installed_version "$NOWHERE_VERSION_VALUE"
     confirm_protocol_upgrade "$NOWHERE_VERSION_VALUE" "${NOWHERE_VERSION:-$NOWHERE_VERSION_VALUE}" || return 1
@@ -1393,14 +1521,17 @@ install_all() {
   configure_values || return 1
   confirm_prelude_upgrade "${NOWHERE_VERSION_VALUE:-}" "$NOWHERE_VERSION" || return 1
   if [[ "$NOWHERE_ROLE" == egress ]] && ! is_nw3_version "$NOWHERE_VERSION"; then die "Egress is available only in NW3."; fi
-  install_binary "$NOWHERE_VERSION"; save_config; write_service; systemctl enable "$SERVICE_NAME"; systemctl restart "$SERVICE_NAME"
+  if [[ "${jq_offered:-0}" -eq 0 ]]; then offer_jq; fi
+  if [[ "$NOWHERE_ROLE" == portal && "${NOWHERE_CLIENT:-$DEFAULT_CLIENT}" != vector ]]; then offer_qrencode; fi
+  install_binary "$NOWHERE_VERSION"; save_config; write_service; service_control enable
+  service_activate
   info "Nowhere service enabled and started."; print_links; print_tls_fingerprint || true
 }
 install_default() { NOWHERE_CLIENT="${NOWHERE_CLIENT:-$DEFAULT_CLIENT}"; [[ "$ROLE_EXPLICIT" -eq 1 ]] || { NOWHERE_ROLE=portal; ROLE_EXPLICIT=1; }; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
 install_vector() { NOWHERE_CLIENT=vector; [[ "$ROLE_EXPLICIT" -eq 1 ]] || { NOWHERE_ROLE=portal; ROLE_EXPLICIT=1; }; [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; install_all; }
 install_egress() { [[ "$VERSION_EXPLICIT" -eq 1 ]] || NOWHERE_VERSION="$DEFAULT_VERSION"; NOWHERE_ROLE=egress; ROLE_EXPLICIT=1; install_all; }
 quick_install() { ASSUME_YES=1 install_default; }
-configure_all() { require_root; require_systemd; load_config; NOWHERE_VERSION="${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; configure_values || return 1; save_config; write_service; systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"; print_links; print_tls_fingerprint || true; }
+configure_all() { require_root; require_service_manager; load_config; NOWHERE_VERSION="${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; configure_values || return 1; save_config; write_service; if service_control is-enabled >/dev/null 2>&1; then service_activate; fi; print_links; print_tls_fingerprint || true; }
 update_saved_version() { sed -i.bak "s/^NOWHERE_VERSION_VALUE=.*/NOWHERE_VERSION_VALUE=$(env_quote "$1")/" "$CONFIG_FILE"; rm -f "${CONFIG_FILE}.bak"; }
 update_saved_language() {
   [[ -f "$CONFIG_FILE" ]] || return 0
@@ -1413,7 +1544,7 @@ update_saved_language() {
 }
 change_language() { NOWHERE_LANG=""; NOWHERE_LANG_VALUE=""; resolve_language; update_saved_language; }
 update_all() {
-  require_root; require_systemd; load_config
+  require_root; require_service_manager; load_config
   [[ -n "${NOWHERE_VERSION_VALUE:-}" ]] || die "No installation config found."
   local current selected preferred current_nw3 selected_nw3
   current="$NOWHERE_VERSION_VALUE"
@@ -1422,6 +1553,7 @@ update_all() {
     selected="$NOWHERE_VERSION"
   else
     preferred="$NW2_LTS_VERSION"; is_nw3_version "$current" && preferred=""
+    if [[ -z "$preferred" ]] && ! command -v jq >/dev/null 2>&1 && version_at_least "$current" "$DEFAULT_VERSION"; then preferred="$current"; fi
     choose_release_version "$preferred" || return
     selected="$SELECTED_VERSION"
   fi
@@ -1443,7 +1575,7 @@ update_all() {
     install_binary "$selected"
     save_config
     write_service
-    systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
+    if service_control is-active >/dev/null 2>&1; then service_control restart; fi
   else
   confirm_prelude_upgrade "$current" "$selected" || return 1
   NOWHERE_VERSION="$selected"
@@ -1460,7 +1592,7 @@ update_all() {
   install_binary "$selected"
   persist_shared_key_migration
   update_saved_version "$selected"
-  systemctl is-active "$SERVICE_NAME" >/dev/null 2>&1 && systemctl restart "$SERVICE_NAME"
+  if service_control is-active >/dev/null 2>&1; then service_control restart; fi
   fi
   info "Nowhere updated to ${selected}."
   print_links
@@ -1505,7 +1637,19 @@ open_tui() {
   is_nw3_version "${NOWHERE_VERSION_VALUE:-$NW2_LTS_VERSION}" && die "NW3 has no TUI command; use status, logs, or telemetry."
   "$BIN_PATH" tui
 }
-uninstall_all() { require_root; require_systemd; systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true; rm -f "$SERVICE_FILE" "$BIN_PATH"; systemctl daemon-reload; warn "Kept ${CONFIG_DIR} to preserve configuration and keys."; }
+uninstall_all() {
+  require_root; require_service_manager
+  if [[ "$SERVICE_BACKEND" == openrc ]]; then
+    if service_control is-active; then service_control stop; fi
+    if service_control is-enabled; then service_control disable; fi
+    rm -f "${CONFIG_DIR}/run" "$(service_log_path)"
+  else
+    systemctl disable --now "$SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+  rm -f "$SERVICE_FILE" "$BIN_PATH"
+  if [[ "$SERVICE_BACKEND" == systemd ]]; then systemctl daemon-reload; fi
+  warn "Kept ${CONFIG_DIR} to preserve configuration and keys."
+}
 
 menu_init_ui() {
   MENU_WIDTH="${COLUMNS:-}"
@@ -1592,7 +1736,7 @@ menu_render() {
   if [[ ! -x "$BIN_PATH" ]]; then
     status="Not installed"; is_chinese && status="未安装"
   else
-    state="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
+    state="$(service_state 2>/dev/null || true)"
     case "$state" in
       active) status="Running"; is_chinese && status="运行中"; status_color="$MENU_GOOD" ;;
       failed) status="Failed"; is_chinese && status="启动失败"; status_color="$MENU_BAD" ;;
@@ -1655,7 +1799,7 @@ menu_render() {
   menu_entry 10 "Restart service" "重启服务" "Reload the saved configuration" "重新加载已保存配置"
   menu_entry 11 "Instance status" "查看 Nowhere 实例状态" "Traffic and active flows" "流量统计与活跃连接"
   menu_entry 12 "Probe TCP connectivity" "测试 TCP 连通性" "Test a target through Portal" "通过 Portal 测试目标连接"
-  menu_entry 13 "Systemd service status" "查看 systemd 服务状态" "Process status and recent logs" "进程状态及最近日志"
+  menu_entry 13 "Service status" "查看服务状态" "Process status" "进程状态"
   menu_entry 14 "Terminal UI (NW2 only)" "打开终端界面（仅 NW2）" "Interactive NW2 dashboard" "NW2 原生交互面板"
   menu_entry 15 "Follow logs" "查看实时日志" "Live service output" "实时查看服务输出"
   menu_section "Links & maintenance" "链接与维护"
@@ -1675,10 +1819,10 @@ menu_render() {
 menu_dispatch() {
   case "$1" in
     1) install_default ;; 2) install_vector ;; 3) install_egress ;; 4) quick_install ;;
-    5) configure_all ;; 6) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;;
+    5) configure_all ;; 6) install_selected_release ;;
     7) update_all ;; 8) service_cmd start ;; 9) service_cmd stop ;; 10) service_cmd restart ;;
     11) run_nowhere_status ;; 12) run_probe ;; 13) service_cmd status ;; 14) open_tui ;;
-    15) journalctl -u "$SERVICE_NAME" -f ;; 16) print_links ;; 17) print_tls_fingerprint ;;
+    15) service_logs ;; 16) print_links ;; 17) print_tls_fingerprint ;;
     18) run_generate_key ;; 19) prompt_remote_fingerprint ;; 20) uninstall_all ;;
     22) update_script ;;
     *) is_chinese && warn "未知选项: $1" || warn "Unknown option: $1" ;;
@@ -1686,7 +1830,7 @@ menu_dispatch() {
 }
 
 menu() {
-  require_root; require_systemd
+  require_root; require_service_manager
   load_config; resolve_language; update_saved_language
   local choice prompt
   if [[ -t 0 && -t 1 ]]; then SCRIPT_UPDATE_AVAILABLE_VERSION="$(check_script_update)"; fi
@@ -1715,12 +1859,12 @@ case "$ACTION" in
   configure|config) configure_all ;;
   update) update_all ;;
   update-script|script-update|self-update) update_script ;;
-  versions|version|releases|release) choose_release_version && { NOWHERE_VERSION="$SELECTED_VERSION"; install_all; } ;;
+  versions|version|releases|release) install_selected_release ;;
   start|stop|restart|status) service_cmd "$ACTION" ;;
   telemetry|instances|runtime-status) run_nowhere_status ;;
   probe) run_probe "$PROBE_TARGET" ;;
   tui|dashboard|monitor) open_tui ;;
-  logs|log) require_root; journalctl -u "$SERVICE_NAME" -f ;;
+  logs|log) service_logs ;;
   link|links) print_links ;;
   fingerprint) if [[ -n "$FINGERPRINT_URL" ]]; then run_remote_fingerprint; else print_tls_fingerprint; fi ;;
   sha256|sha-256) print_tls_fingerprint ;;
