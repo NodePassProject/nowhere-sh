@@ -163,24 +163,32 @@ next-hop Portal. Its route policy and TLS settings are available through
 `--next-up`, `--next-down`, `--next-mux`, `--next-sni`, and `--next-pin`.
 
 NW3 Portal selects one fixed target path: `direct`, `socks`, or `egress`. The
-`egress` path requires a UDP carrier on the Portal and a separately deployed
-NW3 Egress that connects outbound to it. NW3 does not use the NW2 `next` option.
+`egress` path requires a separately deployed NW3 Egress that connects outbound
+to the Portal. NW3 does not use the NW2 `next` option.
 
 ### Egress Deployment
 
-First install or reconfigure the public NW3 Portal with `out=egress` and an
-enabled UDP carrier. Then deploy an NW3 Egress on the exit VPS from menu item
-`3` or with `install-egress`. Enter the Portal's UDP address and port, the same
-32-character shared key, and the Portal's SNI or certificate pin when needed.
-The Egress initiates an outbound QUIC connection, so it needs no inbound
-firewall port. The Portal and Egress must use the same key and Morph setting.
+First install or reconfigure the public Portal with `out=egress`. QUIC/UDP
+is the default and requires a Portal UDP listener. To use TLS/TCP, first
+select `v3.3.0` or newer on both hosts and enable a Portal TCP listener.
+Then deploy Egress on the exit VPS with the matching carrier and port.
+In the menu, use item `6` (Install a selected release) to select `v3.3.0`,
+then choose the appropriate role on each host.
+Egress connects outbound, so it needs no inbound firewall port. Both peers
+must use the same 32-character shared key and Morph setting.
 
 ```bash
 sudo bash nowhere-vps.sh install-egress \
+  --version v3.3.0 \
   --egress-portal-host portal.example.com \
-  --egress-portal-udp-port 2077 \
+  --egress-portal-carrier tcp \
+  --egress-portal-port 2077 \
   --key 0123456789abcdef0123456789abcdef
 ```
+
+Use `udp` for QUIC. Existing QUIC configurations and the old
+`--egress-portal-udp-*` flags still work. Before downgrading below v3.3.0,
+switch Egress back to QUIC and ensure a UDP listener is enabled on Portal.
 
 For a self-signed Portal certificate, get its SHA-256 fingerprint on the Portal
 VPS and pass it as `--egress-pin`. If the certificate is trusted by the system,
@@ -190,7 +198,7 @@ is offline.
 
 To bind target connections to a source address, set `--dial`, `--dial4`, or
 `--dial6` on the Egress. These options affect Egress-to-target connections, not
-its QUIC connection to Portal. Portal `out=egress` cannot use Portal-side dial
+its connection to Portal. Portal `out=egress` cannot use Portal-side dial
 bindings.
 
 ## Morph and Upgrades

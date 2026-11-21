@@ -145,30 +145,35 @@ NW2 Portal 可直连目标、经由出站 SOCKS5，或连接下一个原生 Port
 参数分别为 `--next-up`、`--next-down`、`--next-mux`、`--next-sni`、`--next-pin`。
 
 NW3 Portal 需要选择一个固定出口：`direct`、`socks` 或 `egress`。选择 `egress` 时，Portal
-必须启用 UDP carrier，并另外部署一个主动连接 Portal 的 NW3 Egress；NW3 不再使用
+必须另外部署一个主动连接 Portal 的 NW3 Egress；NW3 不再使用
 NW2 的 `next` 配置。
 
 ### 部署 Egress
 
-先在公网入口机安装或重配 NW3 Portal，选择 `out=egress` 并启用 UDP carrier。然后在
-出口 VPS 通过菜单第 `3` 项或 `install-egress` 部署 NW3 Egress。填写 Portal 的 UDP
-地址和端口、与 Portal 完全相同的 32 位共享密钥，以及需要时使用的 SNI 或证书 Pin。
-Egress 会主动发起 QUIC 连接，因此出口 VPS 不需要开放入站端口。Portal 与 Egress 的
-共享密钥和 Morph 设置必须一致。
+先在公网入口机安装或重配 Portal，选择 `out=egress`。默认走 QUIC/UDP，要求 Portal
+开启 UDP 监听；若要走 TLS/TCP，先把两端都装到 `v3.3.0` 或更高版本，并开启
+Portal 的 TCP 监听。从菜单第 `6` 项「指定 Release 安装」选 `v3.3.0`，再分别选择
+Portal 和 Egress 角色。在出口 VPS 部署 Egress 时，选择对应的载体和端口。Egress 主动连接，
+不需要开放入站端口。两端的 32 位共享密钥和 Morph 设置必须一致。
 
 ```bash
 sudo bash nowhere-vps.sh install-egress \
+  --version v3.3.0 \
   --egress-portal-host portal.example.com \
-  --egress-portal-udp-port 2077 \
+  --egress-portal-carrier tcp \
+  --egress-portal-port 2077 \
   --key 0123456789abcdef0123456789abcdef
 ```
+
+走 QUIC 时选 `udp`。已有 QUIC 配置和旧的 `--egress-portal-udp-*` 参数仍可使用。
+如需降到 v3.3.0 以下，先把 Egress 切回 QUIC，并确保 Portal 开启 UDP 监听。
 
 Portal 使用自签证书时，在入口机查询 SHA-256 指纹并作为 `--egress-pin` 传入。证书
 受系统信任时 Pin 可留为 `none`；证书域名与 Portal 地址不同时，设置 `--egress-sni`。
 Egress 离线时，Portal 不会自动回退为直连。
 
 如需绑定目标连接的源地址，在 Egress 上设置 `--dial`、`--dial4` 或 `--dial6`。
-这些设置只影响 Egress 到目标地址的连接，不影响 Egress 到 Portal 的 QUIC 连接。Portal
+这些设置只影响 Egress 到目标地址的连接，不影响 Egress 到 Portal 的连接。Portal
 使用 `out=egress` 时不能配置 Portal 侧的 dial 绑定。
 
 ## Morph 与升级

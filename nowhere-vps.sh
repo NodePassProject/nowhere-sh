@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="NodePassProject/Nowhere"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh"
-SCRIPT_VERSION="2026.11.21"
+SCRIPT_VERSION="2026.11.22"
 SCRIPT_UPDATE_AVAILABLE_VERSION=""
 SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || printf '%s' "$SCRIPT_PATH")"; fi
@@ -19,6 +19,7 @@ if [[ -f /etc/alpine-release ]] || { [[ ! -d /run/systemd/system ]] && command -
 fi
 
 DEFAULT_VERSION="v3.1.0"
+TLS_EGRESS_MIN_VERSION="v3.3.0"
 NW2_LTS_VERSION="v2.2.1"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
@@ -86,8 +87,8 @@ while [[ $# -gt 0 ]]; do
     --out) NOWHERE_OUT="${2:?missing --out value}"; OUT_EXPLICIT=1; shift 2 ;;
     --out-socks) NOWHERE_OUT_SOCKS="${2:?missing --out-socks value}"; shift 2 ;;
     --egress-portal-host) NOWHERE_EGRESS_PORTAL_HOST="${2:?missing --egress-portal-host value}"; shift 2 ;;
-    --egress-portal-udp-carrier) NOWHERE_EGRESS_PORTAL_UDP_CARRIER="${2:?missing --egress-portal-udp-carrier value}"; shift 2 ;;
-    --egress-portal-udp-port) NOWHERE_EGRESS_PORTAL_UDP_PORT="${2:?missing --egress-portal-udp-port value}"; shift 2 ;;
+    --egress-portal-carrier|--egress-portal-udp-carrier) NOWHERE_EGRESS_PORTAL_CARRIER="${2:?missing Egress Portal carrier}"; shift 2 ;;
+    --egress-portal-port|--egress-portal-udp-port) NOWHERE_EGRESS_PORTAL_PORT="${2:?missing Egress Portal port}"; shift 2 ;;
     --egress-sni) NOWHERE_EGRESS_SNI="${2:?missing --egress-sni value}"; shift 2 ;;
     --egress-pin) NOWHERE_EGRESS_PIN="${2:?missing --egress-pin value}"; shift 2 ;;
     --client) NOWHERE_CLIENT="${2:?missing --client value}"; shift 2 ;;
@@ -170,6 +171,8 @@ Options:
   --out direct|socks|egress      NW3 Portal target path
   --out-socks [user:pass@]host:port
   --egress-portal-host host      Portal host for an NW3 Egress service
+  --egress-portal-carrier udp|udp4|udp6|tcp|tcp4|tcp6 (TLS requires v3.3.0+)
+  --egress-portal-port 2077
   --egress-portal-udp-carrier udp|udp4|udp6
   --egress-portal-udp-port 2077
   --egress-sni name|none --egress-pin sha256|none
@@ -660,6 +663,10 @@ build_endpoint() {
 carrier_without_family() {
   case "$1" in tcp4|tcp6) printf tcp ;; udp4|udp6) printf udp ;; *) printf '%s' "$1" ;; esac
 }
+supports_tls_egress() { is_nw3_version "$1" && version_at_least "$1" "$TLS_EGRESS_MIN_VERSION"; }
+egress_transport_label() {
+  case "$1" in tcp|tcp4|tcp6) printf 'TLS/TCP' ;; *) printf 'QUIC/UDP' ;; esac
+}
 build_portal_url() {
   local key host query endpoint
   key="$(urlencode "$NOWHERE_KEY")"
@@ -872,7 +879,9 @@ validate_nw3_config() {
         direct) ;;
         socks) validate_vector_socks "$NOWHERE_OUT_SOCKS" || die "Invalid Portal SOCKS5 upstream." ;;
         egress)
-          [[ "$NOWHERE_UDP_CARRIER" != none ]] || die "Portal out=egress requires a QUIC/UDP listener."
+          if [[ "$NOWHERE_UDP_CARRIER" == none ]] && ! supports_tls_egress "$NOWHERE_VERSION"; then
+            die "Portal out=egress requires a QUIC/UDP listener before v3.3.0."
+          fi
           [[ "$NOWHERE_DIAL" == auto && "$NOWHERE_DIAL4" == auto && "$NOWHERE_DIAL6" == auto && "$DIAL_EXPLICIT" -eq 0 && "$DIAL4_EXPLICIT" -eq 0 && "$DIAL6_EXPLICIT" -eq 0 ]] || die "Portal out=egress cannot use dial, dial4, or dial6, including explicit auto values."
           ;;
         *) die "Portal out must be direct, socks, or egress." ;;
@@ -886,8 +895,12 @@ validate_nw3_config() {
     egress)
       [[ -n "$NOWHERE_EGRESS_PORTAL_HOST" ]] || die "Egress requires --egress-portal-host (or an interactive Portal host)."
       case "$NOWHERE_EGRESS_PORTAL_HOST" in '*'|0.0.0.0|::|'[::]') die "Egress needs a concrete Portal host." ;; esac
-      [[ "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER" =~ ^(udp|udp4|udp6)$ ]] || die "Egress Portal carrier must be udp, udp4, or udp6."
-      validate_port "$NOWHERE_EGRESS_PORTAL_UDP_PORT" || die "Invalid Portal UDP port for Egress."
+      case "$NOWHERE_EGRESS_PORTAL_CARRIER" in
+        udp|udp4|udp6) ;;
+        tcp|tcp4|tcp6) supports_tls_egress "$NOWHERE_VERSION" || die "TLS Egress requires v3.3.0+ on Portal and Egress." ;;
+        *) die "Invalid Egress Portal carrier." ;;
+      esac
+      validate_port "$NOWHERE_EGRESS_PORTAL_PORT" || die "Invalid Portal port for Egress."
       validate_sni "$NOWHERE_EGRESS_SNI" && validate_pin "$NOWHERE_EGRESS_PIN" || die "Invalid Egress SNI or certificate pin."
       ;;
     *) die "NW3 role must be portal or egress." ;;
@@ -913,7 +926,7 @@ build_nw3_service_url() {
     printf 'portal://%s@%s?%s' "$NOWHERE_KEY" "$endpoint" "$query"
   else
     host="$(format_host_for_url "$NOWHERE_EGRESS_PORTAL_HOST")"
-    endpoint="$(build_endpoint "$host" none 0 "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER" "$NOWHERE_EGRESS_PORTAL_UDP_PORT")"
+    endpoint="${host}/${NOWHERE_EGRESS_PORTAL_CARRIER}:${NOWHERE_EGRESS_PORTAL_PORT}"
     [[ "$NOWHERE_EGRESS_SNI" == none ]] || query="${query}&sni=$(urlencode "$NOWHERE_EGRESS_SNI")"
     [[ "$NOWHERE_EGRESS_PIN" == none ]] || query="${query}&pin=${NOWHERE_EGRESS_PIN}"
     if [[ "$NOWHERE_DIAL" != auto ]]; then
@@ -999,8 +1012,8 @@ configure_nw3_values() {
     if [[ "${NOWHERE_SOCKS:-none}" != none && "$OUT_EXPLICIT" -eq 0 ]]; then NOWHERE_OUT=socks; NOWHERE_OUT_SOCKS="$NOWHERE_SOCKS"; fi
   else
     NOWHERE_EGRESS_PORTAL_HOST="${NOWHERE_EGRESS_PORTAL_HOST:-${NOWHERE_EGRESS_PORTAL_HOST_VALUE:-}}"
-    NOWHERE_EGRESS_PORTAL_UDP_CARRIER="${NOWHERE_EGRESS_PORTAL_UDP_CARRIER:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}"
-    NOWHERE_EGRESS_PORTAL_UDP_PORT="${NOWHERE_EGRESS_PORTAL_UDP_PORT:-${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}}"
+    NOWHERE_EGRESS_PORTAL_CARRIER="${NOWHERE_EGRESS_PORTAL_CARRIER:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER:-${NOWHERE_EGRESS_PORTAL_CARRIER_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}}}"
+    NOWHERE_EGRESS_PORTAL_PORT="${NOWHERE_EGRESS_PORTAL_PORT:-${NOWHERE_EGRESS_PORTAL_UDP_PORT:-${NOWHERE_EGRESS_PORTAL_PORT_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}}}}"
     NOWHERE_EGRESS_SNI="${NOWHERE_EGRESS_SNI:-${NOWHERE_EGRESS_SNI_VALUE:-none}}"
     NOWHERE_EGRESS_PIN="${NOWHERE_EGRESS_PIN:-${NOWHERE_EGRESS_PIN_VALUE:-$DEFAULT_PIN}}"
   fi
@@ -1059,8 +1072,12 @@ configure_nw3_values() {
       fi
     else
       NOWHERE_EGRESS_PORTAL_HOST="$(prompt_value "Portal public host" "Portal 公网域名或 IP" "$NOWHERE_EGRESS_PORTAL_HOST")"
-      NOWHERE_EGRESS_PORTAL_UDP_CARRIER="$(prompt_value "Portal UDP carrier udp/udp4/udp6" "Portal UDP 载体 udp/udp4/udp6" "$NOWHERE_EGRESS_PORTAL_UDP_CARRIER")"
-      NOWHERE_EGRESS_PORTAL_UDP_PORT="$(prompt_value "Portal UDP port" "Portal UDP 端口" "$NOWHERE_EGRESS_PORTAL_UDP_PORT")"
+      if supports_tls_egress "$NOWHERE_VERSION"; then
+        NOWHERE_EGRESS_PORTAL_CARRIER="$(prompt_value "Portal carrier udp/udp4/udp6/tcp/tcp4/tcp6 (TLS requires v3.3.0+ on both peers)" "Portal 载体 udp/udp4/udp6/tcp/tcp4/tcp6（TLS 要求两端 v3.3.0+）" "$NOWHERE_EGRESS_PORTAL_CARRIER")"
+      else
+        NOWHERE_EGRESS_PORTAL_CARRIER="$(prompt_value "Portal UDP carrier udp/udp4/udp6" "Portal UDP 载体 udp/udp4/udp6" "$NOWHERE_EGRESS_PORTAL_CARRIER")"
+      fi
+      NOWHERE_EGRESS_PORTAL_PORT="$(prompt_value "Portal port" "Portal 端口" "$NOWHERE_EGRESS_PORTAL_PORT")"
       NOWHERE_KEY="$(prompt_value "Shared Key (same as Portal, 32 lowercase hex)" "共享密钥（与 Portal 相同，32 位小写十六进制）" "$NOWHERE_KEY")"
       NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
       NOWHERE_EGRESS_SNI="$(prompt_value "Portal SNI/none" "Portal SNI/none" "$NOWHERE_EGRESS_SNI")"
@@ -1115,8 +1132,10 @@ NOWHERE_SOCKS_VALUE=$(env_quote "$NOWHERE_SOCKS")
 NOWHERE_OUT_VALUE=$(env_quote "${NOWHERE_OUT:-direct}")
 NOWHERE_OUT_SOCKS_VALUE=$(env_quote "${NOWHERE_OUT_SOCKS:-none}")
 NOWHERE_EGRESS_PORTAL_HOST_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_HOST:-}")
-NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_UDP_CARRIER:-udp}")
-NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_UDP_PORT:-$DEFAULT_PORT}")
+NOWHERE_EGRESS_PORTAL_CARRIER_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_CARRIER:-udp}")
+NOWHERE_EGRESS_PORTAL_PORT_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_PORT:-$DEFAULT_PORT}")
+NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_CARRIER:-udp}")
+NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE=$(env_quote "${NOWHERE_EGRESS_PORTAL_PORT:-$DEFAULT_PORT}")
 NOWHERE_EGRESS_SNI_VALUE=$(env_quote "${NOWHERE_EGRESS_SNI:-none}")
 NOWHERE_EGRESS_PIN_VALUE=$(env_quote "${NOWHERE_EGRESS_PIN:-none}")
 NOWHERE_NEXT_VALUE=$(env_quote "$NOWHERE_NEXT")
@@ -1321,7 +1340,7 @@ print_links() {
   if is_nw3_version "${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}"; then
     if [[ "${NOWHERE_ROLE_VALUE:-portal}" == egress ]]; then
       echo; echo "Role: NW3 Egress"; echo "Release: ${NOWHERE_VERSION_VALUE}"; echo; echo "Egress URL:"; echo "  ${NOWHERE_SERVICE_URL}"; echo; echo "Client command:"; echo "  nowhere '${NOWHERE_SERVICE_URL}'"
-      echo; echo "Egress makes an outbound QUIC connection; no inbound firewall port is required on this VPS."
+      echo; echo "Egress makes an outbound $(egress_transport_label "${NOWHERE_EGRESS_PORTAL_CARRIER_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}") connection; no inbound firewall port is required on this VPS."
       return
     fi
     echo; echo "Role: NW3 Portal"; echo "Client output: $(client_label "$NOWHERE_CLIENT_VALUE")"; echo "Release: ${NOWHERE_VERSION_VALUE}"; echo; echo "Portal URL:"; echo "  ${NOWHERE_SERVICE_URL}"; echo
@@ -1470,8 +1489,8 @@ choose_release_version() {
   else
     if is_chinese; then warn "未安装 jq，仅显示内置版本；安装 jq 后可查看远程 Release。"
     else warn "jq is not installed; showing bundled versions only. Install jq to list remote releases."; fi
-    metadata="$(printf '%s\tfalse\n' "$DEFAULT_VERSION")"
-    if validate_release_version "$preferred" && is_nw3_version "$preferred" && [[ "$preferred" != "$DEFAULT_VERSION" ]]; then
+    metadata="$(printf '%s\tfalse\n' "$TLS_EGRESS_MIN_VERSION" "$DEFAULT_VERSION")"
+    if validate_release_version "$preferred" && is_nw3_version "$preferred" && [[ "$preferred" != "$DEFAULT_VERSION" && "$preferred" != "$TLS_EGRESS_MIN_VERSION" ]]; then
       metadata+=$'\n'"$(printf '%s\tfalse' "$preferred")"
     fi
   fi
@@ -1553,7 +1572,7 @@ update_all() {
     selected="$NOWHERE_VERSION"
   else
     preferred="$NW2_LTS_VERSION"; is_nw3_version "$current" && preferred=""
-    if [[ -z "$preferred" ]] && ! command -v jq >/dev/null 2>&1 && version_at_least "$current" "$DEFAULT_VERSION"; then preferred="$current"; fi
+    if [[ -z "$preferred" ]] && ! command -v jq >/dev/null 2>&1 && version_at_least "$current" "$TLS_EGRESS_MIN_VERSION"; then preferred="$current"; fi
     choose_release_version "$preferred" || return
     selected="$SELECTED_VERSION"
   fi
@@ -1577,6 +1596,18 @@ update_all() {
     write_service
     if service_control is-active >/dev/null 2>&1; then service_control restart; fi
   else
+  if [[ "$selected_nw3" -eq 1 ]] && ! supports_tls_egress "$selected"; then
+    case "${NOWHERE_ROLE_VALUE:-portal}" in
+      egress)
+        case "${NOWHERE_EGRESS_PORTAL_CARRIER_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}" in
+          tcp|tcp4|tcp6) die "Switch Egress to QUIC before downgrading below v3.3.0." ;;
+        esac ;;
+      portal)
+        if [[ "${NOWHERE_OUT_VALUE:-direct}" == egress && "${NOWHERE_UDP_CARRIER_VALUE:-udp}" == none ]]; then
+          die "Enable a QUIC/UDP listener before downgrading an Egress Portal below v3.3.0."
+        fi ;;
+    esac
+  fi
   confirm_prelude_upgrade "$current" "$selected" || return 1
   NOWHERE_VERSION="$selected"
   NOWHERE_KEY="${NOWHERE_KEY_VALUE:-}"
@@ -1752,10 +1783,11 @@ menu_render() {
   menu_header_line "${status}  |  ${role_label}  |  ${NOWHERE_VERSION_VALUE:--}" "$status_color"
   if [[ "$role" == egress ]]; then
     host="${NOWHERE_EGRESS_PORTAL_HOST_VALUE:--}"
-    ports="${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}:${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}"
+    local egress_carrier="${NOWHERE_EGRESS_PORTAL_CARRIER_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_CARRIER_VALUE:-udp}}"
+    ports="${egress_carrier}:${NOWHERE_EGRESS_PORTAL_PORT_VALUE:-${NOWHERE_EGRESS_PORTAL_UDP_PORT_VALUE:-$DEFAULT_PORT}}"
     menu_header_line "Portal: ${host}  ${ports}"
-    if is_chinese; then menu_header_line "出口模式：Egress / 主动 QUIC 连接"
-    else menu_header_line "Exit: Egress / outbound QUIC"; fi
+    if is_chinese; then menu_header_line "出口模式：Egress / 主动 $(egress_transport_label "$egress_carrier") 连接"
+    else menu_header_line "Exit: Egress / outbound $(egress_transport_label "$egress_carrier")"; fi
   else
     host="${NOWHERE_PUBLIC_HOST_VALUE:--}"
     [[ "${NOWHERE_TCP_CARRIER_VALUE:-none}" == none ]] || ports="TCP:${NOWHERE_TCP_PORT_VALUE:-$DEFAULT_PORT}"
