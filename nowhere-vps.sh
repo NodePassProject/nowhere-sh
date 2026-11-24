@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO="NodePassProject/Nowhere"
 SCRIPT_RAW_URL="https://raw.githubusercontent.com/NodePassProject/nowhere-sh/main/nowhere-vps.sh"
-SCRIPT_VERSION="2026.11.22"
+SCRIPT_VERSION="2026.11.24"
 SCRIPT_UPDATE_AVAILABLE_VERSION=""
 SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
 if command -v readlink >/dev/null 2>&1; then SCRIPT_PATH="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || printf '%s' "$SCRIPT_PATH")"; fi
@@ -20,6 +20,7 @@ fi
 
 DEFAULT_VERSION="v3.1.0"
 TLS_EGRESS_MIN_VERSION="v3.3.0"
+CIPHER_MIN_VERSION="v3.4.0"
 NW2_LTS_VERSION="v2.2.1"
 DEFAULT_PORT="2077"
 DEFAULT_TCP_CARRIER="tcp"
@@ -104,6 +105,7 @@ while [[ $# -gt 0 ]]; do
     --crt|--cert) NOWHERE_CRT="${2:?missing --crt value}"; shift 2 ;;
     --tls-key) NOWHERE_TLS_KEY="${2:?missing --tls-key value}"; shift 2 ;;
     --morph) NOWHERE_MORPH="${2:?missing --morph value}"; shift 2 ;;
+    --cipher) NOWHERE_CIPHER="${2:?missing --cipher value}"; shift 2 ;;
     --morph-tcp-prelude) NOWHERE_MORPH_TCP_PRELUDE="${2:?missing --morph-tcp-prelude value}"; shift 2 ;;
     --rate) NOWHERE_RATE="${2:?missing --rate value}"; shift 2 ;;
     --etar) NOWHERE_ETAR="${2:?missing --etar value}"; shift 2 ;;
@@ -173,6 +175,7 @@ Options:
   --egress-portal-host host      Portal host for an NW3 Egress service
   --egress-portal-carrier udp|udp4|udp6|tcp|tcp4|tcp6 (TLS requires v3.3.0+)
   --egress-portal-port 2077
+  --cipher chacha|aes            Morph cipher for v3.4.0+ (default: chacha)
   --egress-portal-udp-carrier udp|udp4|udp6
   --egress-portal-udp-port 2077
   --egress-sni name|none --egress-pin sha256|none
@@ -664,6 +667,16 @@ carrier_without_family() {
   case "$1" in tcp4|tcp6) printf tcp ;; udp4|udp6) printf udp ;; *) printf '%s' "$1" ;; esac
 }
 supports_tls_egress() { is_nw3_version "$1" && version_at_least "$1" "$TLS_EGRESS_MIN_VERSION"; }
+supports_morph_cipher() { is_nw3_version "$1" && version_at_least "$1" "$CIPHER_MIN_VERSION"; }
+nw3_morph_query() {
+  printf 'morph=%s' "$2"
+  if [[ "$2" == 1 && "$3" == aes ]] && supports_morph_cipher "$1"; then printf '&cipher=aes'; fi
+}
+prompt_morph_cipher() {
+  if [[ "$NOWHERE_MORPH" == 1 ]] && supports_morph_cipher "$NOWHERE_VERSION"; then
+    NOWHERE_CIPHER="$(prompt_value "Morph cipher chacha/aes (must match peers)" "Morph 算法 chacha/aes（须与对端一致）" "$NOWHERE_CIPHER")"
+  fi
+}
 egress_transport_label() {
   case "$1" in tcp|tcp4|tcp6) printf 'TLS/TCP' ;; *) printf 'QUIC/UDP' ;; esac
 }
@@ -703,7 +716,7 @@ build_vector_query() {
       [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]] || { warn "Cannot create a verified NW3 self-signed client URL: certificate fingerprint is unavailable. Check the Nowhere service logs."; return 1; }
       pin="$fingerprint"
     fi
-    query="morph=${morph}"
+    query="$(nw3_morph_query "$version" "$morph" "${NOWHERE_CIPHER_VALUE:-chacha}")"
     [[ "$include_socks" != 1 ]] || query="in=$(encode_socks_query_value "$socks")&${query}"
     [[ "$sni" == none ]] || query="${query}&sni=$(urlencode "$sni")"
     [[ "$pin" == none ]] || query="${query}&pin=${pin}"
@@ -788,6 +801,8 @@ configure_values() {
   NOWHERE_VERSION="${NOWHERE_VERSION:-${NOWHERE_VERSION_VALUE:-$DEFAULT_VERSION}}"
   require_deployable_version "$NOWHERE_VERSION"
   if is_nw3_version "$NOWHERE_VERSION"; then configure_nw3_values "$generated_key" "$detected_host"; return; fi
+  [[ "${NOWHERE_CIPHER:-chacha}" == chacha ]] || die "The selected Morph cipher requires NW3 v3.4.0+."
+  NOWHERE_CIPHER=chacha
   [[ "${NOWHERE_ROLE:-${NOWHERE_ROLE_VALUE:-portal}}" != egress ]] || die "NW2 has no Egress role; choose an NW3 release or configure a Portal role."
   NOWHERE_ROLE=portal
   NOWHERE_CLIENT="${NOWHERE_CLIENT:-${NOWHERE_CLIENT_VALUE:-$DEFAULT_CLIENT}}"
@@ -857,6 +872,11 @@ validate_nw3_config() {
   require_deployable_version "$NOWHERE_VERSION"
   validate_nw3_key "$NOWHERE_KEY" || die "NW3 shared keys must be exactly 32 lowercase hexadecimal characters."
   validate_bool "$NOWHERE_MORPH" || die "Morph must be 0 or 1."
+  case "$NOWHERE_CIPHER" in
+    chacha) ;;
+    aes) supports_morph_cipher "$NOWHERE_VERSION" || die "Morph AES requires v3.4.0+." ;;
+    *) die "Morph cipher must be chacha or aes." ;;
+  esac
   validate_morph_tcp_prelude "$NOWHERE_MORPH_TCP_PRELUDE" || die "Invalid TCP Morph prelude. fade requires NW3 v3.0.1+."
   validate_profile "$NOWHERE_TRANSPORT_MEMORY_PROFILE" || die "Invalid transport memory profile."
   validate_nonnegative_int "$NOWHERE_RATE" && validate_nonnegative_int "$NOWHERE_ETAR" || die "Rate limits must be non-negative integers."
@@ -908,7 +928,8 @@ validate_nw3_config() {
 }
 
 build_nw3_service_url() {
-  local host endpoint query="morph=${NOWHERE_MORPH}"
+  local host endpoint query
+  query="$(nw3_morph_query "$NOWHERE_VERSION" "$NOWHERE_MORPH" "${NOWHERE_CIPHER:-chacha}")"
   if [[ "$NOWHERE_ROLE" == portal ]]; then
     host="$(format_host_for_url "$NOWHERE_LISTEN_HOST")"; [[ -n "$host" ]] || host='*'
     endpoint="$(build_endpoint "$host" "$NOWHERE_TCP_CARRIER" "$NOWHERE_TCP_PORT" "$NOWHERE_UDP_CARRIER" "$NOWHERE_UDP_PORT")"
@@ -961,6 +982,7 @@ configure_nw3_values() {
     default_morph=1
   fi
   NOWHERE_MORPH="$default_morph"
+  NOWHERE_CIPHER="${NOWHERE_CIPHER:-${NOWHERE_CIPHER_VALUE:-chacha}}"
   NOWHERE_KEY="${NOWHERE_KEY:-${NOWHERE_KEY_VALUE:-$generated_key}}"
   if ! validate_nw3_key "$NOWHERE_KEY"; then
     [[ "$KEY_EXPLICIT" -eq 0 && -n "${NOWHERE_KEY_VALUE:-}" ]] || die "NW3 shared keys must be exactly 32 lowercase hexadecimal characters."
@@ -1047,6 +1069,7 @@ configure_nw3_values() {
       NOWHERE_TLS="$(prompt_value "TLS 1=self-signed, 2=PEM" "TLS 1=自签证书，2=PEM 证书" "$NOWHERE_TLS")"
       if [[ "$NOWHERE_TLS" == 2 ]]; then NOWHERE_CRT="$(prompt_value "Certificate chain absolute path" "证书链绝对路径" "$NOWHERE_CRT")"; NOWHERE_TLS_KEY="$(prompt_value "Private key absolute path" "私钥绝对路径" "$NOWHERE_TLS_KEY")"; fi
       NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
+      prompt_morph_cipher
       [[ "$NOWHERE_MORPH" != 1 ]] || NOWHERE_MORPH_TCP_PRELUDE="$(prompt_value "TCP Morph prelude fade/low7/full8 (fade: 3.0.1+)" "TCP Morph 前导 fade/low7/full8（fade: 3.0.1+）" "$NOWHERE_MORPH_TCP_PRELUDE")"
       NOWHERE_RATE="$(prompt_value "Rate Mbps, 0=unlimited" "限速 Mbps，0=不限速" "$NOWHERE_RATE")"
       NOWHERE_ETAR="$(prompt_value "Etar Mbps, 0=unlimited" "Etar Mbps，0=不限速" "$NOWHERE_ETAR")"
@@ -1080,6 +1103,7 @@ configure_nw3_values() {
       NOWHERE_EGRESS_PORTAL_PORT="$(prompt_value "Portal port" "Portal 端口" "$NOWHERE_EGRESS_PORTAL_PORT")"
       NOWHERE_KEY="$(prompt_value "Shared Key (same as Portal, 32 lowercase hex)" "共享密钥（与 Portal 相同，32 位小写十六进制）" "$NOWHERE_KEY")"
       NOWHERE_MORPH="$(prompt_value "Morph 0=off, 1=on" "Morph 0=关闭，1=开启" "$NOWHERE_MORPH")"
+      prompt_morph_cipher
       NOWHERE_EGRESS_SNI="$(prompt_value "Portal SNI/none" "Portal SNI/none" "$NOWHERE_EGRESS_SNI")"
       NOWHERE_EGRESS_PIN="$(prompt_value "Portal certificate pin/none" "Portal 证书 Pin/none" "$NOWHERE_EGRESS_PIN")"
       NOWHERE_DIAL="$(prompt_value "Target source IP (dial), auto=system default" "目标出站源 IP（dial），auto=系统默认" "$NOWHERE_DIAL")"
@@ -1096,6 +1120,7 @@ configure_nw3_values() {
   fi
 
   validate_nw3_config
+  [[ "$NOWHERE_MORPH" != 0 ]] || NOWHERE_CIPHER=chacha
   NOWHERE_SERVICE_URL="$(build_nw3_service_url)"
   NOWHERE_PORTAL="$NOWHERE_SERVICE_URL"
 }
@@ -1121,6 +1146,7 @@ NOWHERE_TLS_VALUE=$(env_quote "$NOWHERE_TLS")
 NOWHERE_CRT_VALUE=$(env_quote "$NOWHERE_CRT")
 NOWHERE_TLS_KEY_VALUE=$(env_quote "$NOWHERE_TLS_KEY")
 NOWHERE_MORPH_VALUE=$(env_quote "$NOWHERE_MORPH")
+NOWHERE_CIPHER_VALUE=$(env_quote "${NOWHERE_CIPHER:-chacha}")
 NOWHERE_MORPH_TCP_PRELUDE_VALUE=$(env_quote "$NOWHERE_MORPH_TCP_PRELUDE")
 NOW_MORPH_TCP_PRELUDE=$(env_quote "$NOWHERE_MORPH_TCP_PRELUDE")
 NOWHERE_RATE_VALUE=$(env_quote "$NOWHERE_RATE")
@@ -1354,12 +1380,14 @@ print_links() {
       fi
     fi
     if [[ "$NOWHERE_CLIENT_VALUE" == anywhere || "$NOWHERE_CLIENT_VALUE" == both ]]; then
+      local morph_query
+      morph_query="$(nw3_morph_query "$NOWHERE_VERSION_VALUE" "$NOWHERE_MORPH_VALUE" "${NOWHERE_CIPHER_VALUE:-chacha}")"
       if [[ "$NOWHERE_TCP_CARRIER_VALUE" != none ]]; then
-        tcp_link="nowhere://${key}@${host}:${NOWHERE_TCP_PORT_VALUE}?net=tcp&morph=${NOWHERE_MORPH_VALUE}#${name}"
+        tcp_link="nowhere://${key}@${host}:${NOWHERE_TCP_PORT_VALUE}?net=tcp&${morph_query}#${name}"
         qr_link="$tcp_link"; echo "Anywhere import link (TLS/TCP):"; echo "  ${tcp_link}"
       fi
       if [[ "$NOWHERE_UDP_CARRIER_VALUE" != none ]]; then
-        udp_link="nowhere://${key}@${host}:${NOWHERE_UDP_PORT_VALUE}?net=udp&morph=${NOWHERE_MORPH_VALUE}#${name}"
+        udp_link="nowhere://${key}@${host}:${NOWHERE_UDP_PORT_VALUE}?net=udp&${morph_query}#${name}"
         [[ -n "$tcp_link" ]] && echo; [[ -n "$qr_link" ]] || qr_link="$udp_link"; echo "Anywhere import link (QUIC/UDP):"; echo "  ${udp_link}"
       fi
       print_qr_code "$qr_link"
@@ -1425,7 +1453,7 @@ current_local_tls_fingerprint() {
     host="$(local_tls_probe_host "$tcp_carrier")"
     key="$(urlencode "${NOWHERE_KEY_VALUE:-${NOWHERE_KEY:-}}")"
     if is_nw3_version "$version"; then
-      url="nowhere://${key}@${host}:${port}?net=tcp&morph=${morph}"
+      url="nowhere://${key}@${host}:${port}?net=tcp&$(nw3_morph_query "$version" "$morph" "${NOWHERE_CIPHER_VALUE:-chacha}")"
     else
       endpoint="$(build_endpoint "$host" "$tcp_carrier" "$port" none "$port")"
       url="nowhere://${key}@${endpoint}?morph=${morph}"
@@ -1489,8 +1517,8 @@ choose_release_version() {
   else
     if is_chinese; then warn "未安装 jq，仅显示内置版本；安装 jq 后可查看远程 Release。"
     else warn "jq is not installed; showing bundled versions only. Install jq to list remote releases."; fi
-    metadata="$(printf '%s\tfalse\n' "$TLS_EGRESS_MIN_VERSION" "$DEFAULT_VERSION")"
-    if validate_release_version "$preferred" && is_nw3_version "$preferred" && [[ "$preferred" != "$DEFAULT_VERSION" && "$preferred" != "$TLS_EGRESS_MIN_VERSION" ]]; then
+    metadata="$(printf '%s\tfalse\n' "$CIPHER_MIN_VERSION" "$TLS_EGRESS_MIN_VERSION" "$DEFAULT_VERSION")"
+    if validate_release_version "$preferred" && is_nw3_version "$preferred" && [[ "$preferred" != "$DEFAULT_VERSION" && "$preferred" != "$TLS_EGRESS_MIN_VERSION" && "$preferred" != "$CIPHER_MIN_VERSION" ]]; then
       metadata+=$'\n'"$(printf '%s\tfalse' "$preferred")"
     fi
   fi
@@ -1572,11 +1600,14 @@ update_all() {
     selected="$NOWHERE_VERSION"
   else
     preferred="$NW2_LTS_VERSION"; is_nw3_version "$current" && preferred=""
-    if [[ -z "$preferred" ]] && ! command -v jq >/dev/null 2>&1 && version_at_least "$current" "$TLS_EGRESS_MIN_VERSION"; then preferred="$current"; fi
+    if [[ -z "$preferred" ]] && ! command -v jq >/dev/null 2>&1 && version_at_least "$current" "$CIPHER_MIN_VERSION"; then preferred="$current"; fi
     choose_release_version "$preferred" || return
     selected="$SELECTED_VERSION"
   fi
   require_deployable_version "$selected"
+  if [[ "${NOWHERE_MORPH_VALUE:-0}" == 1 && "${NOWHERE_CIPHER_VALUE:-chacha}" == aes ]] && ! supports_morph_cipher "$selected"; then
+    die "Switch Morph to chacha before downgrading below v3.4.0."
+  fi
   confirm_protocol_upgrade "$current" "$selected" || return
   current_nw3=0; selected_nw3=0
   is_nw3_version "$current" && current_nw3=1

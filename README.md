@@ -203,6 +203,13 @@ bindings.
 
 ## Morph and Upgrades
 
+On `v3.4.0+`, the Portal and Egress wizards offer `chacha` (default) or
+`aes` when Morph is enabled. Use menu item `6` to select the release, or
+set `--cipher aes` when installing or reconfiguring a compatible version.
+Portal, Vector/Anywhere, and Egress must use the same cipher. Only choose
+`aes` if all peers support it, then reimport the updated client links.
+Switch back to `chacha` before downgrading below v3.4.0.
+
 NW2 is maintained at the `v2.2.1` LTS baseline. It accepts 32–64-character
 lowercase hexadecimal Portal and native `next` keys; newly generated keys are
 32 characters, and existing valid 64-character keys are preserved. NW2 also

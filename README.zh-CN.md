@@ -178,6 +178,12 @@ Egress 离线时，Portal 不会自动回退为直连。
 
 ## Morph 与升级
 
+`v3.4.0+` 开启 Morph 后，Portal 和 Egress 向导会提供 `chacha`（默认）和
+`aes`。可从菜单第 `6` 项选择版本，也可在安装或重配受支持版本时传入
+`--cipher aes`。Portal、Vector/Anywhere 和 Egress 使用的算法必须一致。
+确认所有对端都支持后再选 `aes`，并重新导入客户端链接。降级到 v3.4.0 以下前，
+先切回 `chacha`。
+
 NW2 按 `v2.2.1` LTS 基线维护。Portal 和原生 `next` 密钥接受 32–64 位小写
 十六进制；新生成的密钥为 32 位，已有的合规 64 位密钥会保留。Native Vector、`probe`
 和原生 `next` 会校验证书链与名称；自签证书需要准确的 SHA-256 Pin。
