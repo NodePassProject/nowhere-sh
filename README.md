@@ -210,6 +210,12 @@ Portal, Vector/Anywhere, and Egress must use the same cipher. Only choose
 `aes` if all peers support it, then reimport the updated client links.
 Switch back to `chacha` before downgrading below v3.4.0.
 
+On `v3.5.0+`, the Morph wizard also offers `full` (default) or `core`.
+The grade is independent of the cipher; use `--grade core` when installing
+or reconfiguring a compatible release. Select `core` only if every peer
+supports it, then reimport the updated client links. Switch back to `full`
+before downgrading below v3.5.0.
+
 NW2 is maintained at the `v2.2.1` LTS baseline. It accepts 32–64-character
 lowercase hexadecimal Portal and native `next` keys; newly generated keys are
 32 characters, and existing valid 64-character keys are preserved. NW2 also
